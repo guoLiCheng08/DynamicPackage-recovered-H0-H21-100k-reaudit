@@ -1,0 +1,2 @@
+#define DP_NONCOL_FLEX_SADA_FLAG1 1
+#include "dyn_main_global_noncollinear_sada_flag1_ten_step_compare.c"

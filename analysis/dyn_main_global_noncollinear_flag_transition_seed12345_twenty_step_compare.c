@@ -1,0 +1,3 @@
+#define DP_NONCOL_FLAG_TRANSITION_TWENTY_STEP 1
+#define DP_NONCOL_FLAG_TRANSITION_SEED12345 1
+#include "dyn_main_global_noncollinear_flag_transition_ten_step_compare.c"

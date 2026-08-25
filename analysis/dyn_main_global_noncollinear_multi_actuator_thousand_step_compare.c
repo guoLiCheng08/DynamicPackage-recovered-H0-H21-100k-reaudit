@@ -1,0 +1,2 @@
+#define DP_NONCOL_MULTI_ACTUATOR_THOUSAND 1
+#include "dyn_main_global_noncollinear_flag_transition_ten_step_compare.c"
