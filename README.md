@@ -12,13 +12,14 @@
 | `input/DynamicPackage.elf` | 是 | 只读原始 Linux x86-64 PIE ELF 基线。 |
 | `analysis/**/*.c`、`*.gdb`、`*.md`、`*.py` | 是 | probe、比较器、分析取证、覆盖矩阵和生成器。 |
 | 最终 Microsoft Word/PDF 文档 | 是 | 单星模型、公式、详细设计和验证边界。 |
-| 大体积 `.bin` gold | 否 | 仅存于完整交接包；普通 Git 不适合保存 10,000/100,000 步轨迹。 |
-| 重复 `.log` 与 `build/` | 否 | 可重新生成，不作为协作源码内容提交。 |
+| 代表性 H0 100 步 `.bin` gold | 是 | 22 个文件、约 403 KiB；可运行 H0 100 步逐字节样例。 |
+| 大体积 `.bin` gold（10k/100k）及重复 `.log` 与 `build/` | 否 | 完整交接包保存 gold；日志/build 可重新生成，不作为协作源码内容提交。 |
 
 完整 gold 的采集、双采集确定性、日常比较和 GitHub 归档边界，请阅读：
 
 - [`analysis/coverage_inventory/GOLD_GENERATION_AND_GITHUB_ARCHIVING.md`](analysis/coverage_inventory/GOLD_GENERATION_AND_GITHUB_ARCHIVING.md)
 - [`analysis/coverage_inventory/high_ecc_fifty_step_delivery_reaudit_20260825.md`](analysis/coverage_inventory/high_ecc_fifty_step_delivery_reaudit_20260825.md)
+- [`analysis/coverage_inventory/H0_HUNDRED_SAMPLE_GOLD_AND_AI_HANDOFF.md`](analysis/coverage_inventory/H0_HUNDRED_SAMPLE_GOLD_AND_AI_HANDOFF.md)
 
 ## 构建
 
@@ -39,19 +40,19 @@ make all
 
 gold 不是每次测试生成的文件。它是在新增场景或争议复核时，从隔离的原 ELF 调试执行副本以固定输入独立采集两次，并逐文件 `cmp` 后接受的参考轨迹。
 
-本轻量镜像未附带 gold，因此不能单独声称可运行完整 `make selftest`。要进行全量逐步 bitwise 验证，请使用经过 SHA-256 校验的完整交接 ZIP，解压后执行：
+本轻量镜像附带 H0 高偏心 100 步代表性 gold，因此可运行该场景的独立逐字节比较；但未附带全量 gold，不能单独声称可运行完整 `make selftest`。要进行全量逐步 bitwise 验证，请使用经过 SHA-256 校验的完整交接 ZIP，解压后执行：
 
 ```bash
 make clean && make selftest
 ```
 
-高偏心 H0 50 步的独立复核入口为：
+高偏心 H0 100 步代表性样例的独立复核入口为：
 
 ```bash
-make clean && make check-h0-fifty
+make clean && make check-h0-hundred
 ```
 
-该命令同样需要完整交接包中的对应小型 gold 文件。它比较每步 CoreDynamic caller-state、main telemetry、IPC payload 和 global `y[33]`；不重新生成 gold。
+该命令读取本仓库已附带的 22 个小型 gold 文件，比较每步 CoreDynamic caller-state、main telemetry、IPC payload 和 global `y[33]`；不重新生成 gold。H0 50 步与全量场景仍需要完整交接包中的对应 gold。
 
 ## 当前验证边界
 

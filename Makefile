@@ -10,7 +10,7 @@ SRC := src/dynamic_math.c src/dynamic_devices.c src/dynamic_device_globals.c src
 OBJ := $(SRC:src/%.c=$(BUILD)/%.o)
 LIB := $(BUILD)/libdynamicpackage_recovered.a
 
-.PHONY: all clean selftest check-h0-fifty
+.PHONY: all clean selftest check-h0-fifty check-h0-hundred
 
 all: $(LIB)
 
@@ -672,6 +672,10 @@ selftest: all
 check-h0-fifty: all
 	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_high_ecc_shadow_adjacent_date_fifty_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_high_ecc_shadow_adjacent_date_fifty_step_gold_compare
 	$(BUILD)/dyn_main_high_ecc_shadow_adjacent_date_fifty_step_gold_compare
+
+check-h0-hundred: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_high_ecc_shadow_adjacent_date_hundred_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_high_ecc_shadow_adjacent_date_hundred_step_gold_compare
+	$(BUILD)/dyn_main_high_ecc_shadow_adjacent_date_hundred_step_gold_compare
 
 clean:
 	rm -rf $(BUILD)
