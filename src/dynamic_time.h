@@ -24,6 +24,9 @@ void TimeInit(double year, double month, double day,
 void TimeAdd(double seconds);
 void TimeArrayGet(double out_calendar[6]);
 double TimeTotalGet(void);
+/* 测试回放用：将正式 ELF 的时间全局状态复制到 C 影子。 */
+void dp_time_seed(const double calendar[6], double second_decimal,
+                  double second_total);
 
 /* 原符号 Calc_JD：year, month, day, hour, minute, second → Julian Date。 */
 double Calc_JD(double year, double month, double day,

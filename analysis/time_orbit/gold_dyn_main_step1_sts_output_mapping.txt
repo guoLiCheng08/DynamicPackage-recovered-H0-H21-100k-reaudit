@@ -1,0 +1,15 @@
+STS output[0]
+  element[0] bits=0xbfd99f90ebdbe276 at not-found
+  element[1] bits=0xbfe2a66bd386e87b at not-found
+  element[2] bits=0x3fe2a5ec4a05c8f3 at not-found
+  element[3] bits=0xbfd9a2e6c3824fff at not-found
+STS output[1]
+  element[0] bits=0x3fe195a845aa02b6 at not-found
+  element[1] bits=0xbfc9802099780426 at not-found
+  element[2] bits=0xbfe997648a41c57f at not-found
+  element[3] bits=0xbfc18984876ebe56 at not-found
+STS output[2]
+  element[0] bits=0x3fc18f5fd61d098c at not-found
+  element[1] bits=0xbfe995830b7b623c at not-found
+  element[2] bits=0xbfc988f127962dc4 at not-found
+  element[3] bits=0xbfe1973aa8c2dbe6 at not-found

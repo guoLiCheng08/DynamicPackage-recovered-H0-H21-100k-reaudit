@@ -3,6 +3,7 @@
 #define _GNU_SOURCE
 #endif
 #include "dynamic_math.h"
+#include "dynamic_rng.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -535,8 +536,10 @@ double Frac(double value)
 double rng_uniform_pos(void)
 {
     double value;
+    int32_t random_value;
     do {
-        value = (double)rand() / (double)RAND_MAX;
+        if (dp_rng_next(&random_value) != 0) return 0.5;
+        value = (double)random_value / (double)RAND_MAX;
     } while (value == 0.0 || value == 1.0);
     return value;
 }

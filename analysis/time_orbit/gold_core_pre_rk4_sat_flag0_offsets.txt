@@ -1,0 +1,12 @@
+dp_flag0_inertia: count=9 offset=0x20
+dp_flag0_inverse: count=9 offset=0x80
+dp_flag0_m3_e8: count=9 offset=0x400
+dp_flag0_m3_448: count=9 offset=0x460
+dp_flag0_m3_4a8: count=9 offset=0x4c0
+dp_flag0_m3_508: count=9 offset=0x520
+dp_flag0_m3_568: count=9 offset=0x580
+dp_flag0_m6: count=30 offset=0x6a0
+dp_flag0_c: count=30 offset=0x8b0
+dp_flag0_m9: count=9 offset=0x9b8
+dp_flag0_ma: count=100 offset=0xa18
+dp_flag0_md: count=100 offset=0xd50

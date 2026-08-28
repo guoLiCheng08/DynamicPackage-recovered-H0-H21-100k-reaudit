@@ -1,0 +1,25 @@
+[gyro] base=0x555555616a00 size=0x640
+  item=0 projection_matrix.data: 0x0000555555616ac8, relative=+0xc8 (inside)
+  item=0 measure.data: 0x0000555555616b28, relative=+0x128 (inside)
+  item=1 projection_matrix.data: 0x0000555555616de8, relative=+0x3e8 (inside)
+  item=1 measure.data: 0x0000555555616e48, relative=+0x448 (inside)
+[magmeter] base=0x5555556172c0 size=0x270
+  item=0 projection_matrix.data: 0x0000555555617380, relative=+0xc0 (inside)
+  item=0 measure.data: 0x00005555556173e0, relative=+0x120 (inside)
+  item=1 projection_matrix.data: 0x00005555556174b8, relative=+0x1f8 (inside)
+  item=1 measure.data: 0x0000555555617518, relative=+0x258 (inside)
+[sts] base=0x555555617540 size=0x450
+  item=0 installation_matrix.data: 0x00005555556175b8, relative=+0x78 (inside)
+  item=0 error_quat.xyz.data: 0x0000555555617658, relative=+0x118 (inside)
+  item=0 measure_quat.xyz.data: 0x0000555555617698, relative=+0x158 (inside)
+  item=1 installation_matrix.data: 0x0000555555617728, relative=+0x1e8 (inside)
+  item=1 error_quat.xyz.data: 0x00005555556177c8, relative=+0x288 (inside)
+  item=1 measure_quat.xyz.data: 0x0000555555617808, relative=+0x2c8 (inside)
+  item=2 installation_matrix.data: 0x0000555555617898, relative=+0x358 (inside)
+  item=2 error_quat.xyz.data: 0x0000555555617938, relative=+0x3f8 (inside)
+  item=2 measure_quat.xyz.data: 0x0000555555617978, relative=+0x438 (inside)
+[dss] base=0x5555556179a0 size=0x2b0
+  item=0 projection_matrix.data: 0x0000555555617a58, relative=+0xb8 (inside)
+  item=0 measure.data: 0x0000555555617ac0, relative=+0x120 (inside)
+  item=1 projection_matrix.data: 0x0000555555617bb0, relative=+0x210 (inside)
+  item=1 measure.data: 0x0000555555617c18, relative=+0x278 (inside)

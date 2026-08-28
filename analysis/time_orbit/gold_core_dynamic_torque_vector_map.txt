@@ -1,0 +1,8 @@
+DpVector header +0x000: count=3 data=+0x080 values=[-0.1224710544146752, -0.1224710544146752, 0.1]
+DpVector header +0x010: count=3 data=+0x098 values=[0.0, -4.10925768862178e-05, -6.061912451980141e-05]
+DpVector header +0x020: count=3 data=+0x0b0 values=[0.0, 0.0, 0.0]
+DpVector header +0x030: count=3 data=+0x0c8 values=[0.0018494956078728515, -0.0014844153743415567, -0.00036508023353129483]
+DpVector header +0x040: count=3 data=+0x0e0 values=[1.618792004905484e-07, -1.5947144603878277e-07, -2.4077544517656165e-09]
+DpVector header +0x050: count=3 data=+0x0f8 values=[0.0, 0.0, 0.0]
+DpVector header +0x060: count=3 data=+0x110 values=[0.0, 0.0, 0.0]
+DpVector header +0x070: count=3 data=+0x128 values=[-0.1224710544146752, -0.12251214699156142, 0.09993938087548021]

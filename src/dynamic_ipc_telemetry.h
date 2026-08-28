@@ -19,6 +19,8 @@ extern "C" {
 #define DP_IPC_FLOAT_BASE 0x038u
 #define DP_IPC_U8_BASE 0x998u
 #define DP_IPC_SHM_NAME "/sharedvars_example"
+#define DP_IPC_FLOAT_COUNT ((DP_IPC_U8_BASE - DP_IPC_FLOAT_BASE) / sizeof(float))
+#define DP_IPC_U8_COUNT (DP_IPC_SHM_BYTES - DP_IPC_U8_BASE)
 
 typedef struct {
     uint8_t raw[DP_IPC_SHM_BYTES];
@@ -39,6 +41,7 @@ typedef struct {
 
 /* 对应 init_shared/close_shared：创建时初始化锁并清零 +0x38..+0xBEF；已有对象仅映射。 */
 int dp_ipc_shared_open(DpIpcSharedHandle *handle);
+int dp_ipc_shared_open_named(DpIpcSharedHandle *handle, const char *name);
 void dp_ipc_shared_close(DpIpcSharedHandle *handle);
 
 /* 原 ELF 的进程全局共享对象接口；getter 在尚未映射时自动调用 init_shared。 */

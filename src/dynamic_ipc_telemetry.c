@@ -6,6 +6,7 @@
 extern const unsigned char *dp_desk_command_drc_for_test(void) __attribute__((weak));
 
 #include <fcntl.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -137,7 +138,7 @@ float read_float32(const uint8_t *source, int32_t endian_flag)
     return value;
 }
 
-int dp_ipc_shared_open(DpIpcSharedHandle *handle)
+int dp_ipc_shared_open_named(DpIpcSharedHandle *handle, const char *name)
 {
     int fd;
     int created = 0;
@@ -150,7 +151,7 @@ int dp_ipc_shared_open(DpIpcSharedHandle *handle)
         return 0;
     }
     handle->fd = -1;
-    fd = shm_open(DP_IPC_SHM_NAME, O_CREAT | O_EXCL | O_RDWR, 0666);
+    fd = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0666);
     if (fd >= 0) {
         created = 1;
         if (ftruncate(fd, (off_t)DP_IPC_SHM_BYTES) < 0) {
@@ -158,7 +159,7 @@ int dp_ipc_shared_open(DpIpcSharedHandle *handle)
             return -2;
         }
     } else {
-        fd = shm_open(DP_IPC_SHM_NAME, O_RDWR, 0666);
+        fd = shm_open(name, O_RDWR, 0666);
         if (fd < 0) {
             return -1;
         }
@@ -185,6 +186,14 @@ int dp_ipc_shared_open(DpIpcSharedHandle *handle)
     handle->fd = fd;
     handle->mapped = mapped;
     return 0;
+}
+
+int dp_ipc_shared_open(DpIpcSharedHandle *handle)
+{
+    const char *name = getenv("DP_IPC_SHM_NAME");
+
+    return dp_ipc_shared_open_named(handle,
+                                    name != NULL && name[0] == '/' ? name : DP_IPC_SHM_NAME);
 }
 
 void dp_ipc_shared_close(DpIpcSharedHandle *handle)

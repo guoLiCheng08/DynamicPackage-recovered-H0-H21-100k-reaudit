@@ -240,6 +240,22 @@ void TimeInit(double year, double month, double day,
     dp_time_calendar_tm.tm_sec = (int)second;
 }
 
+void dp_time_seed(const double calendar[6], double second_decimal,
+                  double second_total)
+{
+    if (calendar == NULL) return;
+    TimeInit(calendar[0], calendar[1], calendar[2], calendar[3],
+             calendar[4], calendar[5] - floor(calendar[5]));
+    dp_time_calendar_array[0] = calendar[0];
+    dp_time_calendar_array[1] = calendar[1];
+    dp_time_calendar_array[2] = calendar[2];
+    dp_time_calendar_array[3] = calendar[3];
+    dp_time_calendar_array[4] = calendar[4];
+    dp_time_calendar_array[5] = calendar[5];
+    dp_time_second_decimal = second_decimal;
+    dp_time_second_total = second_total;
+}
+
 void TimeAdd(double seconds)
 {
     dp_time_second_decimal += seconds;

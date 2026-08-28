@@ -1,0 +1,17 @@
+# 构建产物和本地运行输出
+/build/
+*.o
+*.a
+*.so
+*.log
+*.pid
+
+# 原 ELF 金标二进制保留在本地归档，不直接进入 GitHub
+/analysis/**/*.bin
+
+# 交付压缩包、截图和生成文档不作为源码版本管理
+*.zip
+*.tar.gz
+*.pdf
+*.docx
+*.png

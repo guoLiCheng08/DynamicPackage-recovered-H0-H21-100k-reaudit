@@ -1,0 +1,10 @@
+warning: GDB: Failed to set controlling terminal: Inappropriate ioctl for device
+
+Size: 0
+
+
+Size: 3
+   1.00000
+  -2.50000
+   3.25000
+

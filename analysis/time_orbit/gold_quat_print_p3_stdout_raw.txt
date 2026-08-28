@@ -1,0 +1,7 @@
+warning: GDB: Failed to set controlling terminal: Inappropriate ioctl for device
+
+qs: 1.250000
+qv.x: -2.500000
+qv.y: 3.250000
+qv.z: -4.500000
+

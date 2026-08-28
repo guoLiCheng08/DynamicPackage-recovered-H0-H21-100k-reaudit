@@ -1,5 +1,6 @@
 /* DynamicPackage Gyro / MagMeter 恢复实现。 */
 #include "dynamic_sensors.h"
+#include "dynamic_rng.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -95,15 +96,18 @@ double dp_ran_gaussian_recovered(double sigma)
     double x;
     double y;
     double radius_squared;
+    int32_t random_value;
 
     do {
         do {
-            x = (double)rand() / 2147483647.0;
+            if (dp_rng_next(&random_value) != 0) return 0.0;
+            x = (double)random_value / 2147483647.0;
         } while (x == 0.0 || x == 1.0);
         x = x + x;
         x = x - 1.0;
         do {
-            y = (double)rand() / 2147483647.0;
+            if (dp_rng_next(&random_value) != 0) return 0.0;
+            y = (double)random_value / 2147483647.0;
         } while (y == 0.0 || y == 1.0);
         y = y + y;
         y = y - 1.0;

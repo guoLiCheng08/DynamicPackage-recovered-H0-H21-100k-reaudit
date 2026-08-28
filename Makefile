@@ -6,11 +6,11 @@ CPPFLAGS ?= -D_XOPEN_SOURCE=700 -Isrc
 
 BUILD := build
 # dynamic_recovered.c 是保留的早期控制流草稿，含未恢复的外部占位调用，不参与高保真库链接。
-SRC := src/dynamic_math.c src/dynamic_devices.c src/dynamic_device_globals.c src/dynamic_measure_globals.c src/dynamic_mainout_globals.c src/dynamic_dyn_main_globals.c src/dynamic_core_input_globals.c src/dynamic_core_input.c src/dynamic_core_bridge.c src/dynamic_torque.c src/dynamic_orbit.c src/dynamic_time.c src/dynamic_rk4.c src/dynamic_flex.c src/dynamic_dynamics.c src/dynamic_satellite_globals.c src/dynamic_dll_init.c src/dynamic_command_wrappers.c src/dynamic_telemetry.c src/dynamic_telemetry_wrappers.c src/dynamic_scheduler.c src/dynamic_sensor_schedule.c src/dynamic_sensors.c src/dynamic_environment.c src/dynamic_core_environment.c src/dynamic_main_bridge.c src/dynamic_ipc_telemetry.c
+SRC := src/dynamic_rng.c src/dynamic_math.c src/dynamic_devices.c src/dynamic_device_globals.c src/dynamic_measure_globals.c src/dynamic_mainout_globals.c src/dynamic_dyn_main_globals.c src/dynamic_core_input_globals.c src/dynamic_core_input.c src/dynamic_core_bridge.c src/dynamic_torque.c src/dynamic_orbit.c src/dynamic_time.c src/dynamic_rk4.c src/dynamic_flex.c src/dynamic_dynamics.c src/dynamic_satellite_globals.c src/dynamic_dll_init.c src/dynamic_command_wrappers.c src/dynamic_telemetry.c src/dynamic_telemetry_wrappers.c src/dynamic_scheduler.c src/dynamic_sensor_schedule.c src/dynamic_sensors.c src/dynamic_environment.c src/dynamic_core_environment.c src/dynamic_main_bridge.c src/dynamic_ipc_telemetry.c
 OBJ := $(SRC:src/%.c=$(BUILD)/%.o)
 LIB := $(BUILD)/libdynamicpackage_recovered.a
 
-.PHONY: all clean selftest check-h0-fifty check-h15-global-y check-h16-h17-global-y check-h4-h5-h7-global-y check-h26-high-ecc-cross-command check-h27-third-seed-cross-command check-h28-dyn-main-array check-h29-get-desk-command check-h30-startup-chain check-h31-get-desk-lifecycle check-h32-high-ecc-safe-boundary check-h33-ipc-getter-invalid check-h34-circular-equatorial check-h35-near-parabolic
+.PHONY: all clean selftest shadow-runtime compare-state compare-state-frames compare-state-logs publish-dual-input trace-elf-dyn-main reset-elf-runtime full-shadow-validation import-gold compare-matrix check-h0-fifty check-h15-global-y check-h16-h17-global-y check-h4-h5-h7-global-y check-h26-high-ecc-cross-command check-h27-third-seed-cross-command check-h28-dyn-main-array check-h29-get-desk-command check-h30-startup-chain check-h31-get-desk-lifecycle check-h32-high-ecc-safe-boundary check-h33-ipc-getter-invalid check-h34-circular-equatorial check-h35-near-parabolic
 
 all: $(LIB)
 
@@ -22,6 +22,38 @@ $(BUILD)/%.o: src/%.c | $(BUILD)
 
 $(LIB): $(OBJ)
 	$(AR) rcs $@ $^
+
+# 用法：make import-gold ARCHIVE=/home/gpc22/code/cfs_test/分析这是啥文件.zip
+import-gold:
+	@test -n "$(ARCHIVE)" || (echo "请指定 ARCHIVE=外层ZIP路径"; exit 2)
+	python3 tools/import_gold_assets.py "$(ARCHIVE)" --target .
+
+compare-matrix: all
+	bash tools/run_compare_matrix.sh
+
+shadow-runtime: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) tools/c_shadow_runtime.c $(LIB) -lm -pthread -lrt -o $(BUILD)/c_shadow_runtime
+
+compare-state: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) tools/compare_elf_c_state.c -lm -pthread -lrt -o $(BUILD)/compare_elf_c_state
+
+compare-state-frames: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) tools/compare_state_frames.c -lm -pthread -lrt -o $(BUILD)/compare_state_frames
+
+compare-state-logs: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) tools/compare_state_logs.c -lm -pthread -lrt -o $(BUILD)/compare_state_logs
+
+publish-dual-input: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) tools/publish_dual_input.c $(LIB) -lm -pthread -lrt -o $(BUILD)/publish_dual_input
+
+trace-elf-dyn-main: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) tools/trace_elf_dyn_main.c -lm -pthread -lrt -o $(BUILD)/trace_elf_dyn_main
+
+reset-elf-runtime:
+	bash tools/reset_elf_runtime.sh $(ELF_PID)
+
+full-shadow-validation:
+	bash tools/run_full_shadow_validation.sh
 
 selftest: all
 	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/math_abi_selftest.c $(BUILD)/dynamic_math.o -lm -o $(BUILD)/math_abi_selftest
