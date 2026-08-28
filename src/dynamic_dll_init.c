@@ -4,6 +4,7 @@
 #include "dynamic_satellite_globals.h"
 #include "dynamic_default_sensor_config.h"
 
+#include <stdint.h>
 #include <string.h>
 
 /*
@@ -18,6 +19,46 @@ static DpInitialConditions dp_dynamic_dll_initial;
 const DpInitialConditions *dp_dynamic_dll_initial_conditions(void)
 {
     return &dp_dynamic_dll_initial;
+}
+
+static void dp_load_default_sada_config(void)
+{
+    memset(&SADA, 0, sizeof(SADA));
+    SADA.current_angle[0] = 3.14159265358979323846;
+    SADA.current_angle[1] = 3.14159265358979323846;
+    SADA.command_limit[0] = 0.003490658503988659;
+    SADA.command_limit[1] = 0.001308996938995747;
+    SADA.acceleration_limit[0] = 1.7453292519943296e-05;
+    SADA.acceleration_limit[1] = 8.726646259971648e-06;
+}
+
+/* H28 dyn_init_array 原 ELF 设备快照：前三个 MTQ 通道限幅为 400；
+ * Thruster 的静态标定和对象内三维向量也在执行第一帧命令前已就绪。 */
+static void dp_load_dyn_init_command_device_defaults(void)
+{
+    static const uint64_t force_scale_bits = UINT64_C(0x3f2d8b2b41cd29ea);
+    static const uint64_t lever_z_bits = UINT64_C(0x3f847ae147ae147b);
+    unsigned index;
+
+    for (index = 0u; index < 3u; ++index) {
+        MTQ[index].moment_limit = 400.0;
+        MTQ[index].installation_axis.count = 3;
+        MTQ[index].installation_axis.reserved_04 = 0;
+        MTQ[index].installation_axis.data =
+            (double *)((unsigned char *)&MTQ[index] + 0x20u);
+        MTQ[index].installation_axis.data[0] = index < 2u ? 1.0 : 0.0;
+        MTQ[index].installation_axis.data[1] = index == 2u ? 1.0 : 0.0;
+        MTQ[index].installation_axis.data[2] = 0.0;
+    }
+    memcpy(&Thruster.force_scale, &force_scale_bits, sizeof(Thruster.force_scale));
+    if (Thruster.lever_arm.data != NULL && Thruster.force_input.data != NULL) {
+        Thruster.lever_arm.data[0] = 0.0;
+        Thruster.lever_arm.data[1] = 0.0;
+        memcpy(&Thruster.lever_arm.data[2], &lever_z_bits, sizeof(double));
+        Thruster.force_input.data[0] = 0.0;
+        Thruster.force_input.data[1] = -1.0;
+        Thruster.force_input.data[2] = 0.0;
+    }
 }
 
 void DynamicDllInit(void)
@@ -48,13 +89,7 @@ void DynamicDllInit(void)
     dp_dynamic_dll_initial.spacecraft_mass = 600.0;
 
     dp_device_globals_reset();
-    memset(&SADA, 0, sizeof(SADA));
-    SADA.current_angle[0] = 3.14159265358979323846;
-    SADA.current_angle[1] = 3.14159265358979323846;
-    SADA.command_limit[0] = 0.003490658503988659;
-    SADA.command_limit[1] = 0.001308996938995747;
-    SADA.acceleration_limit[0] = 1.7453292519943296e-05;
-    SADA.acceleration_limit[1] = 8.726646259971648e-06;
+    dp_load_default_sada_config();
 }
 
 static void dp_relocate_default_rwheel(void)
@@ -96,6 +131,9 @@ static void dp_sync_device_measure_from_defaults(void)
 void dyn_init(const DpInitialConditions *initial)
 {
     dp_load_default_sensor_config();
+    /* H28 原 ELF dyn_init_array 双采集表明，该入口在 DynamicInit 前也装入
+     * 与 DynamicDllInit 相同的 SADA 静态角度及限幅；遗漏会使首个 SADA 命令分叉。 */
+    dp_load_default_sada_config();
     STS_Init();
     Gyro_Init();
     DSS_Init();
@@ -103,6 +141,8 @@ void dyn_init(const DpInitialConditions *initial)
     Wheel_Init();
     MagTorque_Init();
     Thruster_Init();
+    dp_load_dyn_init_command_device_defaults();
+    MagTorque_Init();
     DynamicInit(initial);
 
     /* DynamicInit 的恢复端复用全局导数 reset，会清除设备 descriptor backing；
@@ -118,6 +158,8 @@ void dyn_init(const DpInitialConditions *initial)
     Wheel_Init();
     MagTorque_Init();
     Thruster_Init();
+    dp_load_dyn_init_command_device_defaults();
+    MagTorque_Init();
     dp_sync_device_measure_from_defaults();
 }
 

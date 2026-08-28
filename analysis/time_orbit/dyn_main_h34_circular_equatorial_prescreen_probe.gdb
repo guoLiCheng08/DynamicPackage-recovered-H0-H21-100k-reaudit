@@ -1,0 +1,37 @@
+set confirm off
+set disable-randomization on
+file /home/ubuntu/dynamicpackage_194_work/dynamicpackage_recovered_work/analysis/debug_runner/DynamicPackage.exec_copy
+set inferior-tty /dev/null
+break main
+commands
+  silent
+  set $base = (char *)&main - 0x1340
+  set $g_data_slot = (void **)($base + 0x2184b0)
+  set $data = (char *)calloc(1, 0xbf0)
+  call ((int (*)(void *, void *))pthread_rwlock_init)($data, 0)
+  set *$g_data_slot = $data
+  set $payload = $data + 0x38
+  call ((void (*)(void))DynamicDllInit)()
+  set $initial = $base + 0x218ae0
+  # H34: exact circular/equatorial root elements, with finite otherwise-unused angles.
+  set {double}($initial + 0x68) = 7000000.0
+  set {double}($initial + 0x70) = 0.0
+  set {double}($initial + 0x78) = 0.0
+  set {double}($initial + 0x80) = 0.73
+  set {double}($initial + 0x88) = 1.17
+  set {double}($initial + 0x90) = 2.41
+  call ((void (*)(void *))dyn_init)($initial)
+  dump binary memory /home/ubuntu/dynamicpackage_194_work/dynamicpackage_recovered_work/analysis/time_orbit/gold_h34_circular_equatorial_prescreen_initial_y.bin &y ((char *)&y + 0x108)
+  call ((void (*)(unsigned int))srand)(1)
+  set $out = (char *)calloc(0x220, 1)
+  set $core = (char *)calloc(0x148, 1)
+  set $cmd = (char *)calloc(0x78, 1)
+  call ((void (*)(void *, void *, const void *))dyn_main)($out, $core, $cmd)
+  call ((void (*)(void *, void *))sendDynTele)(0, $out)
+  dump binary memory /home/ubuntu/dynamicpackage_194_work/dynamicpackage_recovered_work/analysis/time_orbit/gold_h34_circular_equatorial_prescreen_state.bin $core ($core + 0x108)
+  dump binary memory /home/ubuntu/dynamicpackage_194_work/dynamicpackage_recovered_work/analysis/time_orbit/gold_h34_circular_equatorial_prescreen_global_y.bin &y ((char *)&y + 0x108)
+  dump binary memory /home/ubuntu/dynamicpackage_194_work/dynamicpackage_recovered_work/analysis/time_orbit/gold_h34_circular_equatorial_prescreen_out.bin $out ($out + 0x220)
+  dump binary memory /home/ubuntu/dynamicpackage_194_work/dynamicpackage_recovered_work/analysis/time_orbit/gold_h34_circular_equatorial_prescreen_ipc_payload.bin $payload ($data + 0xbf0)
+  quit
+end
+run

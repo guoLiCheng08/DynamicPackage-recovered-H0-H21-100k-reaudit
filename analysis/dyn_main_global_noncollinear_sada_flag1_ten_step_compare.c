@@ -11,7 +11,21 @@
 
 #define GOLD_DIR "analysis/time_orbit/"
 #define DYN_GOLD_DIR "analysis/golden/dyn_main_global_abi/"
-#if defined(DP_ORBIT_TIME_BOUNDARY_THOUSAND_STEP)
+#if defined(DP_ORBIT_TIME_BOUNDARY_H22_GLOBAL_Y_THOUSAND_STEP)
+#define STATE_GOLD "gold_orbit_time_boundary_h22_global_y_thousand_first_state.bin"
+#define MAIN_GOLD "gold_orbit_time_boundary_h22_global_y_thousand_first_out.bin"
+#define IPC_GOLD "gold_orbit_time_boundary_h22_global_y_thousand_first_ipc_payload.bin"
+#define GLOBAL_Y_GOLD "gold_orbit_time_boundary_h22_global_y_thousand_first_global_y.bin"
+#define SCENARIO_LABEL "orbit-time boundary H22 global-y thousand-step"
+#define STEP_COUNT 1000u
+#elif defined(DP_ORBIT_TIME_BOUNDARY_H22_GLOBAL_Y_HUNDRED_STEP)
+#define STATE_GOLD "gold_orbit_time_boundary_h22_global_y_hundred_first_state.bin"
+#define MAIN_GOLD "gold_orbit_time_boundary_h22_global_y_hundred_first_out.bin"
+#define IPC_GOLD "gold_orbit_time_boundary_h22_global_y_hundred_first_ipc_payload.bin"
+#define GLOBAL_Y_GOLD "gold_orbit_time_boundary_h22_global_y_hundred_first_global_y.bin"
+#define SCENARIO_LABEL "orbit-time boundary H22 global-y hundred-step"
+#define STEP_COUNT 100u
+#elif defined(DP_ORBIT_TIME_BOUNDARY_THOUSAND_STEP)
 #define STATE_GOLD "gold_orbit_time_boundary_thousand_step_state.bin"
 #define MAIN_GOLD "gold_orbit_time_boundary_thousand_step_out.bin"
 #define IPC_GOLD "gold_orbit_time_boundary_thousand_step_ipc_payload.bin"
@@ -33,13 +47,15 @@
 #define STATE_GOLD "gold_leap_day_leo_thousand_step_state.bin"
 #define MAIN_GOLD "gold_leap_day_leo_thousand_step_out.bin"
 #define IPC_GOLD "gold_leap_day_leo_thousand_step_ipc_payload.bin"
-#define SCENARIO_LABEL "leap-day LEO thousand-step"
+#define GLOBAL_Y_GOLD "gold_leap_day_leo_h23_global_y_thousand_first_global_y.bin"
+#define SCENARIO_LABEL "leap-day LEO H23 global-y thousand-step"
 #define STEP_COUNT 1000u
 #elif defined(DP_LEAP_DAY_LEO_HUNDRED_STEP)
 #define STATE_GOLD "gold_leap_day_leo_hundred_step_state.bin"
 #define MAIN_GOLD "gold_leap_day_leo_hundred_step_out.bin"
 #define IPC_GOLD "gold_leap_day_leo_hundred_step_ipc_payload.bin"
-#define SCENARIO_LABEL "leap-day LEO hundred-step"
+#define GLOBAL_Y_GOLD "gold_leap_day_leo_h23_global_y_hundred_first_global_y.bin"
+#define SCENARIO_LABEL "leap-day LEO H23 global-y hundred-step"
 #define STEP_COUNT 100u
 #elif defined(DP_LEAP_DAY_LEO)
 #define STATE_GOLD "gold_leap_day_leo_ten_step_state.bin"
@@ -51,13 +67,15 @@
 #define STATE_GOLD "gold_noncollinear_flex_sada_flag1_thousand_step_state.bin"
 #define MAIN_GOLD "gold_noncollinear_flex_sada_flag1_thousand_step_out.bin"
 #define IPC_GOLD "gold_noncollinear_flex_sada_flag1_thousand_step_ipc_payload.bin"
-#define SCENARIO_LABEL "nonzero-flex noncollinear SADA flag1 thousand-step"
+#define GLOBAL_Y_GOLD "gold_noncollinear_flex_sada_flag1_h24_global_y_thousand_first_global_y.bin"
+#define SCENARIO_LABEL "nonzero-flex noncollinear SADA flag1 H24 global-y thousand-step"
 #define STEP_COUNT 1000u
 #elif defined(DP_NONCOL_FLEX_SADA_FLAG1_HUNDRED_STEP)
 #define STATE_GOLD "gold_noncollinear_flex_sada_flag1_hundred_step_state.bin"
 #define MAIN_GOLD "gold_noncollinear_flex_sada_flag1_hundred_step_out.bin"
 #define IPC_GOLD "gold_noncollinear_flex_sada_flag1_hundred_step_ipc_payload.bin"
-#define SCENARIO_LABEL "nonzero-flex noncollinear SADA flag1 hundred-step"
+#define GLOBAL_Y_GOLD "gold_noncollinear_flex_sada_flag1_h24_global_y_hundred_first_global_y.bin"
+#define SCENARIO_LABEL "nonzero-flex noncollinear SADA flag1 H24 global-y hundred-step"
 #define STEP_COUNT 100u
 #elif defined(DP_NONCOL_FLEX_SADA_FLAG1_TWENTY_STEP)
 #define STATE_GOLD "gold_noncollinear_flex_sada_flag1_twenty_step_state.bin"
@@ -222,23 +240,40 @@ int main(void)
     unsigned char *expected_states = NULL;
     unsigned char *expected_main = NULL;
     unsigned char *expected_ipc = NULL;
+#ifdef GLOBAL_Y_GOLD
+    unsigned char *expected_global_y = NULL;
+#endif
     unsigned step;
     int mismatch = 0;
 
     expected_states = malloc(STEP_COUNT * STATE_BYTES);
     expected_main = malloc(STEP_COUNT * MAIN_BYTES);
     expected_ipc = malloc(STEP_COUNT * IPC_PAYLOAD_BYTES);
-    if (expected_states == NULL || expected_main == NULL || expected_ipc == NULL ||
+#ifdef GLOBAL_Y_GOLD
+    expected_global_y = malloc(STEP_COUNT * STATE_BYTES);
+#endif
+    if (expected_states == NULL || expected_main == NULL || expected_ipc == NULL
+#ifdef GLOBAL_Y_GOLD
+        || expected_global_y == NULL
+#endif
+        ||
         read_gold("gold_sensor_init_gyro.bin", DeviceMeasure.gyro, sizeof(DeviceMeasure.gyro)) ||
         read_gold("gold_sensor_init_magmeter.bin", DeviceMeasure.magmeter, sizeof(DeviceMeasure.magmeter)) ||
         read_gold("gold_sensor_init_sts.bin", DeviceMeasure.sts, sizeof(DeviceMeasure.sts)) ||
         read_gold("gold_sensor_init_dss.bin", DeviceMeasure.dss, sizeof(DeviceMeasure.dss)) ||
         read_gold(STATE_GOLD, expected_states, STEP_COUNT * STATE_BYTES) ||
         read_gold(MAIN_GOLD, expected_main, STEP_COUNT * MAIN_BYTES) ||
-        read_gold(IPC_GOLD, expected_ipc, STEP_COUNT * IPC_PAYLOAD_BYTES)) {
+        read_gold(IPC_GOLD, expected_ipc, STEP_COUNT * IPC_PAYLOAD_BYTES)
+#ifdef GLOBAL_Y_GOLD
+        || read_gold(GLOBAL_Y_GOLD, expected_global_y, STEP_COUNT * STATE_BYTES)
+#endif
+        ) {
         free(expected_states);
         free(expected_main);
         free(expected_ipc);
+#ifdef GLOBAL_Y_GOLD
+        free(expected_global_y);
+#endif
         return 1;
     }
 
@@ -249,6 +284,9 @@ int main(void)
         free(expected_states);
         free(expected_main);
         free(expected_ipc);
+#ifdef GLOBAL_Y_GOLD
+        free(expected_global_y);
+#endif
         return 1;
     }
     setup_initial(&initial);
@@ -341,11 +379,18 @@ int main(void)
         (void)snprintf(label, sizeof(label), SCENARIO_LABEL "[%u] IPC payload", step + 1u);
         mismatch |= compare_blob(label, actual_ipc.raw + DP_IPC_FLOAT_BASE,
                                  expected_ipc + step * IPC_PAYLOAD_BYTES, IPC_PAYLOAD_BYTES);
+#ifdef GLOBAL_Y_GOLD
+        (void)snprintf(label, sizeof(label), SCENARIO_LABEL "[%u] global y", step + 1u);
+        mismatch |= compare_blob(label, y, expected_global_y + step * STATE_BYTES, STATE_BYTES);
+#endif
     }
 
     free(expected_states);
     free(expected_main);
     free(expected_ipc);
+#ifdef GLOBAL_Y_GOLD
+    free(expected_global_y);
+#endif
     if (mismatch == 0) {
         puts("dyn_main " SCENARIO_LABEL " original-ELF compare: PASS (bitwise)");
     }

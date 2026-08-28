@@ -384,3 +384,166 @@ H21 保持前述第二 LCG 种子 `0x2468ace1`、2025-01-02 03:04:05 近圆 LEO�
 100,000 步四块文件 SHA-256：state `8bc705db223fda6627bef87e4873c001eb4b7627cb6c26f5928292478a1708f8`，global `y` `a2ca5a4a914ba34406a21d67e4fe1d52d91f5448677c530f02f65ce463e8a2ad`，main `b022873d1b3411d72dc643e51154e345665389837705f4b0482297c9c0af4c1b`，IPC `8b69c88e0e15896793808ddf4682a78c34ded3e14bfe364b12037e0b23eeac8b`。
 
 两个超长时域比较器已加入默认严格门禁。从空构建执行 `make clean && make selftest` 成功；`make -n selftest` 展开 322 个测试可执行项／644 条编译执行命令，PASS 行计数 313、错误模式计数 0。H21 100,000 步仅证明当前平台、当前运行时／严格编译条件、列明初态、传感器随机种子和第二 LCG 离散命令时间序列下的上述观察块一致；它仍不穷尽其他初态、其他随机种子、连续命令值、异常输入、并发或未观察对象。本工程仅用于离线研究和仿真，禁止用于飞行、控制、实体执行机构或安全关键用途。
+
+## H22 增量记录：补齐既有 H15 的 Global `y`
+
+H22 是本轮取证工作标签，**不是第 23 个独立输入场景**。它保持既有 H15 的跨年高偏心输入合同（2031-12-31 23:59:50、`a=26,560,000 m`、`e=0.65`、姿态 `(0.5,0.5,-0.5,0.5)`、固定非零角速度、零设备命令与 `srand(12345)`），仅补齐此前 H15-100／H15-1000 未观察的 global `y[33]`。
+
+| 既有场景 | 增加的观察块 | 长度 | 原 ELF 双采集 | 恢复端逐步比较 | global `y` SHA-256 |
+|---|---|---:|---|---|---|
+| **H15** | global `y[33]`（264 B/步） | 100 步 | 两次四块文件逐文件 `cmp` PASS；state/main/IPC 同既有 H15 gold | 四块逐步、0-byte mismatch、PASS | `70b28a78d1d38cf28115173fafb3fa585a97aabafc5655bfb9c15ebc6f70f7d2` |
+| **H15** | global `y[33]`（264 B/步） | 1000 步 | 两次四块文件逐文件 `cmp` PASS；state/main/IPC 同既有 H15 gold | 四块逐步、0-byte mismatch、PASS | `bf376ad8f7c5a57f9662acf246486058c18519e6d34d0670d4d7babcac65e7cf` |
+
+新增 1,100 个内部状态步骤、290,400 B 独有 global `y` 观察。两个 H22 包装器以共享 H15 比较器的编译期开关启用 global-y 读取和每步 bitwise 比较，均已接入默认 `selftest`，并另提供 `make check-h15-global-y`。空构建执行 `make clean && make selftest` 展开 **324 个测试可执行项**，输出 315 条 PASS、非零字节差异 0、显式失败 0；完整日志为 `analysis/coverage_inventory/full_clean_selftest_with_h22_h15_global_y_gate.log`。
+
+> **H22 的适用边界。** H22 只将 H15 的已定义输入路径从三块观察提升为四块观察，并不增加新的随机种子、命令序列或输入初态，也不证明任意输入或平台上的全域等价。本工程只限离线研究与仿真，禁止用于飞行、控制、实体执行机构或安全关键用途。
+
+## H23 首批增量记录：补齐既有 H16/H17 的 Global `y`
+
+H23 为覆盖补齐工作标签，**不是第 24 个或第 25 个独立输入场景**。本批维持既有 H16（闰日普通近地轨道、替代姿态、固定非零角速度、零柔性/零命令、`srand(12345)`）与 H17（近圆 LEO、单位四元数、三轴初始角速度、零柔性/零命令、`srand(1)`）的输入合同，仅补写并比较 `global y[33]`。
+
+| 既有场景 | 增加的观察块 | 长度 | 原 ELF 双采集与既有三块交叉核验 | 恢复端逐步比较 | global `y` SHA-256 |
+|---|---|---:|---|---|---|
+| **H16** | global `y[33]`（264 B/步） | 100 步 | 四块 first/second `cmp` PASS；state/main/IPC 同既有 gold | 四块逐步、0-byte mismatch、PASS | `757284c39a6ab29e9cbd0fdde7d5903592464d401c6641883eb4027ad699fb7f` |
+| **H16** | global `y[33]`（264 B/步） | 1000 步 | 四块 first/second `cmp` PASS；state/main/IPC 同既有 gold | 四块逐步、0-byte mismatch、PASS | `8f7efc94caeaa0e222cb0e98eac67bf1c7cf49332ec0ec3f38dbe36564678e57` |
+| **H17** | global `y[33]`（264 B/步） | 100 步 | 四块 first/second `cmp` PASS；state/main/IPC 同既有 gold | 四块逐步、0-byte mismatch、PASS | `e40e9c2201c6efd5952c91169dfe22003b93e7577505803d55ba10db89535d25` |
+| **H17** | global `y[33]`（264 B/步） | 1000 步 | 四块 first/second `cmp` PASS；state/main/IPC 同既有 gold | 四块逐步、0-byte mismatch、PASS | `2e57874a6684f5283caf8dbc7cf2bcae6a34752db62c746d477bd8abf00c6e1c` |
+
+H16/H17 的既有长期比较器均已直接扩展为四块逐步差分；新增 `make check-h16-h17-global-y`。从空构建执行此门禁得到 4 条 PASS 与 8,800 条零字节四块记录；再执行 `make clean && make selftest` 展开 324 个测试可执行项，315 条 PASS、非零字节差异 0、显式失败 0。global `y` 覆盖因此升至 15/22，余下未覆盖的既有场景为 H3/H4/H5/H7/H8/H9/H10。
+
+> **H23 的适用边界。** H23 只将两条既有受控路径从三块观察扩展为四块观察，不新增随机种子、命令时间表或输入初态，不能被解释为全域或跨平台等价证明。本工程只限离线研究与仿真，禁止用于飞行、控制、实体执行机构或安全关键用途。
+
+## H24 增量记录：补齐既有 H4/H5/H7 的 Global `y`
+
+H24 是覆盖补齐工作标签，**不是新增的独立输入场景**。它分别维持 H4 的预置飞轮与前九步多执行机构命令、H5 的持续饱和 SADA 请求，以及 H7 的非零柔性/非共线 SADA flag1/惯量更新合同，仅将此前三块观察扩展为 global `y[33]` 第四块。
+
+| 既有场景 | 增加的观察块 | 长度 | 原 ELF 双采集与既有三块交叉核验 | 恢复端逐步比较 | global `y` SHA-256 |
+|---|---|---:|---|---|---|
+| **H4** | global `y[33]`（264 B/步） | 100 步 | 四块 first/second `cmp` PASS；state/main/IPC 同既有 gold | 四块逐步、0-byte mismatch、PASS | `c00b7a56487047576648492a4c65924330bddd49711422f35cde48b6dae80b2b` |
+| **H4** | global `y[33]`（264 B/步） | 1000 步 | 四块 first/second `cmp` PASS；state/main/IPC 同既有 gold | 四块逐步、0-byte mismatch、PASS | `b903d27b03184a7cc1da8711c84e2a611138a2cda125034c929608ef74e47169` |
+| **H5** | global `y[33]`（264 B/步） | 100 步 | 四块 first/second `cmp` PASS；state/main/IPC 同既有 gold | 四块逐步、0-byte mismatch、PASS | `6431bb6f8e98bdf3a284eb22e8671a77411dc834fb8d20f4e0a47c4096d127dd` |
+| **H5** | global `y[33]`（264 B/步） | 1000 步 | 四块 first/second `cmp` PASS；state/main/IPC 同既有 gold | 四块逐步、0-byte mismatch、PASS | `33717097afa1209425ade3e81ffe66a568dc4d18587562db7a77ae19084ccc1e` |
+| **H7** | global `y[33]`（264 B/步） | 100 步 | 四块 first/second `cmp` PASS；state/main/IPC 同既有 gold | 四块逐步、0-byte mismatch、PASS | `a9e37ea232f7e3f33459570a641c74f68e1ee5a08597a549ad4f3bd5a03fd22a` |
+| **H7** | global `y[33]`（264 B/步） | 1000 步 | 四块 first/second `cmp` PASS；state/main/IPC 同既有 gold | 四块逐步、0-byte mismatch、PASS | `5d303542abaa083636856b536de8df7f67e0508c4b884bfde21b1f99421ec200` |
+
+H4/H7 的共享长期比较器和 H5 的独立比较器均已扩展为四块逐步差分；新增 `make check-h4-h5-h7-global-y`。空构建运行该门禁得到 6 条 PASS 与 13,200 条零字节四块记录；随后 `make clean && make selftest` 展开 324 个测试可执行项、315 条 PASS、非零字节差异 0、显式失败 0。global `y` 覆盖升至 18/22；仅 H3/H8/H9/H10 的 DSS 噪声组合仍未建此内部块 gold。
+
+> **H24 的适用边界。** H24 只扩展既有有限路径的观察块，不新增命令、随机种子或初态，也不证明全域或跨平台等价。本工程只限离线研究与仿真，禁止用于飞行、控制、实体执行机构或安全关键用途。
+
+## H26 新增独立场景：高偏心跨年、完整柔性与有效多执行机构命令
+
+| 场景 | 初始／命令特征 | 100 步 | 1000 步 | gold 双采集 | Makefile 门禁 |
+|---|---|---:|---:|---:|---:|
+| **H26** | 2031-12-31 23:59:50；高偏心轨道 `a=26,560,000 m`、`e=0.65`；高偏心 caller-state 位置/速度；替代姿态；完整 20 维交错柔性状态；DSS0 噪声开/DSS1 关；`srand(12345)`；RWheel0 预置；LCG 种子 `0x2468ace1` 的有限有效轮/MTQ/SADA/推力器/惯量更新命令 | PASS | PASS | PASS | 已接入 |
+
+H26 是 H0/H15 高偏心跨年环境与 H21 完整柔性、传感器和有效多执行机构 LCG 命令的新增联合路径，并非对原有场景的 global-y 补洞。原 ELF 的 100/1000 步均采用 first/second 两次独立采集；四个逐步块和七个终态执行机构快照共 11 个文件在每种长度均逐文件 `cmp` 一致。恢复端逐步四块和终态快照均为 0-byte mismatch；`make check-h26-high-ecc-cross-command` 与完整严格 selftest 均通过。
+
+| H26 长度 | caller-state SHA-256 | global y SHA-256 | main SHA-256 | IPC SHA-256 |
+|---:|---|---|---|---|
+| 100 | `10e57af9570bcd95b9bf7480d7397e4f620731585b5d2999ac3a67c568247ddc` | `9fc186a44143cb049051e981164814406d42034dc2314f2b9f89359143939eaf` | `afc60f9f2fd25092fc97d00cfcf0a932c1cfd85b5a56ca1e62cb19de3593bd65` | `3ed5f9338c9b7897af021f673f7ff6104a14846de33c4f13ef922e8f65096ae6` |
+| 1000 | `58e319eda7f7ed3d77cb885975b70ece96352c9e554f3415d2890fabc1112109` | `4082236cd2ab73dcfdb85e708c32d7be2cd56d927831a794159e282b78cbde92` | `d59d1473c1ad2325b1a3550c927da6a27d665c158bfb9c8ee6ee345aaf76e8d8` | `0e737bcd211261b5792686265c3e9e81d73b3b80c73b51b850f55240d57a0f87` |
+
+> **H26 的适用边界。** H26 仅证明列明的高偏心根数、时间、state、柔性模板、DSS 开关/种子、飞轮预置和有限有效命令映射，在当前 Linux x86-64 和严格 C11 构建下的 bitwise 一致性；不证明任意轨道、连续命令、异常、并发、其他平台或未观察对象的全域等价。本工程仅限离线研究与仿真，禁止用于飞行、控制、实体执行机构或安全关键用途。
+
+## H28：旧式 `dyn_main_array` 数组 ABI（新增独立入口，2026-08-25）
+
+H28 不新增结构化 `dyn_main` 初态场景，而是验证公开旧式数组 ABI：30 个 `double` 初始化数组、16 个 `double` 设备命令数组、0x1e8 B legacy output 与 0x200 B legacy state。命令同时覆盖轮扭矩、MTQ、SADA、推力器与惯量更新。原 ELF 100/1000 步 output/state 两块均 first/second 双采集并 `cmp` PASS；恢复端最初在第 1 步发现分叉，随后以原 ELF `dyn_init_array` 及首帧后设备快照定位并补齐 SADA、前三 MTQ 限幅/安装轴与 Thruster 静态默认值。修复后 100 步 200 条、1000 步 2000 条 legacy 缓冲比较均为 0-byte mismatch；`make check-h28-dyn-main-array` 两条 PASS，空构建完整 selftest 为 321 条 PASS、非零差异 0、显式失败 0。该入口证据不改变 24 个结构化主场景计数，但确认主 `dyn_main` 通过不能自动外推到数组 ABI。
+
+| 长度 | 原 ELF output SHA-256 | 原 ELF state SHA-256 | 恢复端结论 |
+|---:|---|---|---|
+| 100 | `94eed78188a46a359e560a4758325eacc3d06b5c87724f61cf0e8b66f370feb5` | `54b0af090a09a37e8a072badf22e0899b5e21067243b1dd8bd7c4f2c43832a5e` | bitwise PASS |
+| 1000 | `ed7a94197228f313dfe7c131926073c5e52effeac8e7590c32131e6c09ae2776` | `a2eb4eb72813988f6511f47a7d2efcc79ec89b1572c5874c88256f040ab47694` | bitwise PASS |
+
+相关证据：`analysis/coverage_inventory/h28_dyn_main_array_abi_diagnostic_20260825.md`。
+
+## H29：`getDeskCommand` 连续共享 IPC 入口（新增独立入口，2026-08-25）
+
+H29 验证 `getDeskCommand` 的连续共享输入读取路径。每步受控写入 float 索引 64/65/66 与 byte 索引 20–36，连续调用后逐步比较四个 desk flag（4 B）、`DynamicDllInit` 初始条件的三轴 float 尾部（12 B）及 DRC 状态（112 B）。100/1000 步三块均 first/second 原 ELF 双采集并逐文件 `cmp` PASS；恢复端分别建立 300/3000 条逐步比较，均为 0-byte mismatch。`make check-h29-get-desk-command` 通过两条比较器，空构建完整 selftest 为 323 条 PASS、非零差异 0、显式失败 0。该证据覆盖受控无竞争共享映射，不覆盖锁失败、并发竞争、IPC 建立失败或任意索引。
+
+| 长度 | flags SHA-256 | init-tail SHA-256 | DRC SHA-256 | 恢复端结论 |
+|---:|---|---|---|---|
+| 100 | `790c0c6651e15a3d83988fd9a460ca8baac644591db1dcbb72fcd4873a2777e7` | `d7a5057ef21932cc628e20f4c8e3a3c43d528aeeecfa471e6dd898ed3378582a` | `744a5770a2e1206655a3ef3e5816ab93b56f9503bc4dee3e81bd48a65e27a5fd` | bitwise PASS |
+| 1000 | `3acf1272ce18e8a67b80e637bee5340159568a0752880744bdceab0e033b43bc` | `6f422a68da2337704769912dedb0aaaacb9789fd1229c7bb34df9275d77b8d58` | `d69989f689f4890b56f6920ad4a70493e6d7b3ba9610c2fa8fada7731d9901a1` | bitwise PASS |
+
+相关证据：`analysis/coverage_inventory/h29_get_desk_command_continuous_result_20260825.md`。
+
+## H30：离线启动链 `DynamicDllInit → getDeskCommand → dyn_init → dyn_main`（新增主路径，2026-08-25）
+
+H30 将固定共享 IPC 启动输入经 `getDeskCommand` 写入 `DynamicDllInit` 初始条件，再调用 `dyn_init` 并连续运行零命令 `dyn_main`。它是此前 H28（数组 ABI）、H29（共享 IPC）和主传播场景之外的端到端启动路径。100/1000 步均对 CoreDynamic 264 B、global `y[33]` 264 B、main 544 B 与 IPC 3000 B 执行原 ELF first/second 双采集和恢复端逐步差分。原 ELF 每种长度四块均 `cmp` PASS；恢复端分别输出 400/4000 条 0-byte 比较记录。`make check-h30-startup-chain` 两条 PASS，空构建完整 selftest 为 325 条 PASS、非零差异 0、显式失败 0。
+
+| 长度 | state SHA-256 | global-y SHA-256 | main SHA-256 | IPC SHA-256 | 恢复端结论 |
+|---:|---|---|---|---|---|
+| 100 | `8161ed292012760acc5bf24ba19ee4fcde5312b8d39b93c740480989ab44bf88` | `b8281273993e20dbcca289f718617d15a066c71fb49f26adff378440a9e82a16` | `bf2e6ae0d311b2c1e3692358b83cb1c6a76b638e70282182b2680322eac5c380` | `d1902c857e91ae50eec6ac917d4b447d36eeca58c824e0dfe37ef6cc042a11b4` | bitwise PASS |
+| 1000 | `f31c67d609afcbede6e29df6fcd7e0778dd0dbcbe85fa8d8eda8eeeb74eb07a2` | `ede1cba7e6b84638802060e2c0e20f38a579739c8b2f3d44d32e1f9e875a1c45` | `fd499a5f4618cc5b1f2b714c305659450446ac705d8ce016308ee45a849745cf` | `c4fa97525a16ed46f1723f56ed5204525daa101cbd4dd79401616f7043b8ebf6` | bitwise PASS |
+
+相关证据：`analysis/coverage_inventory/h30_startup_chain_result_20260825.md`。该入口仅在受控无竞争共享映射和离线仿真范围内验证；不得外推到真实飞行、控制或安全关键用途。
+
+## H31：`getDeskCommand` 共享 IPC 生命周期（新增公开入口状态序列，2026-08-25）
+
+H31 覆盖固定无竞争共享 IPC 的 `init_shared → getDeskCommand → close_shared → init_shared → getDeskCommand` 序列。受控输入为 float 索引 64/65/66 的 `(6.25,-7.5,8.75)` 与 byte 索引 20–36 的 `0xa0..0xb0`。两个阶段分别比较 desk flags 4 B、`DynamicDllInit` 初始角速度尾部 12 B 和 DRC 112 B；first/second 原 ELF 双采集的六个文件全体 `cmp` PASS。恢复端六块均 0-byte mismatch，`make check-h31-get-desk-lifecycle` PASS，空构建完整 selftest 为 326 条 PASS、非零差异 0、显式失败 0。该结论只覆盖对象未 unlink、`shm_open/mmap` 成功且无竞争读写的固定离线合同；不覆盖权限、锁、资源耗尽或并发失败路径。
+
+| 阶段 | flags SHA-256 | init-tail SHA-256 | DRC SHA-256 | 恢复端结论 |
+|---|---|---|---|---|
+| 打开后 | `a57d29e1bf3bda74302c8f8148977cab1499a1c3f239146a75d185b6f25bf9e1` | `f22b426ff83c22af9814c35e460e550fe1b48dfd729506003804807041138c13` | `5b1fc66c257e31114be672fe96c9686633c3dd49078d386fa429a4eb9d2cb5e1` | bitwise PASS |
+| 重开后 | `a57d29e1bf3bda74302c8f8148977cab1499a1c3f239146a75d185b6f25bf9e1` | `f22b426ff83c22af9814c35e460e550fe1b48dfd729506003804807041138c13` | `5b1fc66c257e31114be672fe96c9686633c3dd49078d386fa429a4eb9d2cb5e1` | bitwise PASS |
+
+相关证据：`analysis/coverage_inventory/h31_get_desk_command_ipc_lifecycle_result_20260825.md`。
+
+## H32：安全高偏心根数组合（新增主路径，2026-08-25）
+
+H32 是在 H0/H11/H14/H15/H26/H27 之外的高偏心数值边界路径。固定合同为 `a=42,000,000 m`、`e=0.75`、轨道角 `(0.85,2.3,1.1,0.0)`、2032-06-30 23:59:50、位置 `(10,500,000,0,0) m`、速度 `(0,8,150,0) m/s`、四元数 `(0.5,-0.5,0.5,0.5)`、完整非零柔性、零设备命令与 `srand(12345)`。在长期采集前，原 ELF 单步 state/main/global y 浮点文本扫描未出现 `NaN` 或 `Inf`。
+
+100/1000 步四块（CoreDynamic 264 B、global `y[33]` 264 B、main 544 B、IPC 3000 B）均完成 first/second 原 ELF 双采集并逐文件 `cmp` PASS。恢复端分别为 400/4000 条逐步 0-byte 差分记录；`make check-h32-high-ecc-safe-boundary` 为 2 条 PASS，空构建全量 selftest 为 328 条 PASS、非零块 0、显式失败 0。
+
+| 长度 | state SHA-256 | global-y SHA-256 | main SHA-256 | IPC SHA-256 | 恢复端结论 |
+|---:|---|---|---|---|---|
+| 100 | `3787f366e0751cf7c5c1ce36f79dc6e2e2ef8a88ed7779d71bed0a760b2de30e` | `abc3834b022fa2c8f1e849becab650df01d2070a4420ada6f54e18961c56ff9d` | `e0821d7582707f5456115cbcf231f54f4cf23511b062b83b58ab6ceb22f7f776` | `a7caa86a75cf6d33e0272100fcd4670a122721fd6639a873ecdc08dd369c6eb5` | bitwise PASS |
+| 1000 | `c2936333d77d91621577001fdb79cc53c8ab7b4c802fcc48c99822d2ebdcf117` | `789d4a9f553fec9fc53b5c3ff677489c8a90d9576a88d0132950d7a9675024b0` | `0dbb7287f70a864fc9232709f064d5338d229863b9976821588fedca2787a76c` | `8b22441aa4133c4fb95c1880863fabe20f1f9a8ae530b2a744e38e20c46380e0` | bitwise PASS |
+
+相关证据：`analysis/coverage_inventory/h32_high_ecc_safe_boundary_result_20260825.md`。这只覆盖当前平台、固定根数与非有限预筛通过的受控离线轨迹，不能外推到任意高偏心参数或安全关键用途。
+
+## H33 增量记录：共享 IPC getter 错误合同
+
+H33 不属于 `dyn_main` 长时域场景；它针对此前成功读取与无竞争生命周期之外的共享 IPC 公共 getter 分支，采用一个新建、零初始化的真实共享映射，执行无副作用、单进程、无竞争调用序列。原 ELF first/second GDB probe 对四个导出块逐文件 `cmp` 一致，恢复端严格 C11 比较器亦全部 bitwise PASS。
+
+| 场景 | 调用合同 | 原 ELF 双采集 | 恢复端比较块 | Makefile 门禁 |
+|---|---|---|---|---|
+| **H33** | `init_shared()` 后，对 `get_float_value` 与 `get_uint8_value` 分别传入 `-1`、`0x258` 和有效 index/`NULL` 输出；然后 `close_shared()` 后以有效 float getter 自动重开 | PASS | 8 个返回码（32 B）、无效 float 输出哨兵（4 B）、自动重开 float 输出（4 B）、无效 uint8 输出哨兵（1 B）均 0-byte mismatch | `check-h33-ipc-getter-invalid`，已接入 `selftest` |
+
+原 ELF 返回码数组为 `[0, -21, -21, -22, -21, -21, -22, 0]`：负索引和 `0x258` 无效索引返回 `-21` 并保持调用方输出哨兵；有效索引加 `NULL` 输出返回 `-22`；关闭后 `get_float_value(0, ...)` 自动重开并从新零初始化帧返回 `0.0f`。相应 first gold SHA-256 为：返回码 `afafd35cae487a6699cb19515903c734529269e17c1f996876881be4d0e475b5`，无效 float 哨兵 `367da4259c7beab7a7ce59235298dd373143ba8100b46498843f0a3fdb821e85`，自动重开 float 输出 `df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119`，无效 uint8 哨兵 `bbeebd879e1dff6918546dc0c179fdde505f2a21591c9a9c96e36b054ec5af83`。
+
+> **H33 的适用边界。** 证据仅覆盖已列出的真实共享映射、单进程、无竞争、当前 Linux x86-64 运行时和严格 C11 标志下的固定调用序列。它不证明共享对象创建失败、权限、资源耗尽、损坏锁、并发读写、任意指针／索引、其他 getter/setter、其他平台或安全关键用途的行为。本工程只限离线研究与仿真，禁止用于飞行、控制、实体执行机构或任何安全关键用途。
+
+## H34 增量记录：圆赤道根数启动链主传播
+
+H34 从 `DynamicDllInit` 的默认初始块出发，覆写轨道根数后调用 `dyn_init`，使 `Elements2PosVel_M` 的结果写入实际传播全局状态，再以零 caller `core`、零设备命令和 `srand(1)` 连续调用 `dyn_main`。根数固定为 `a=7,000,000 m`、`e=0`、`i=0`、RAAN `0.73 rad`、近地点幅角 `1.17 rad`、平近点角 `2.41 rad`。该合同以正常量级的有限值进入圆/赤道退化面；RAAN 与近地点幅角仅作为有限 ABI 输入，不被表述为该退化几何下的唯一物理参数。
+
+在建立长轨迹前，原 ELF 单步预筛已对初始化 `y`、一步 caller state、global `y`、main 和 IPC payload 扫描浮点文本，未见 `NaN` 或 `Inf`。随后 100/1000 步的四个逐步流各自 first/second 独立采集并逐文件 `cmp` 一致。恢复端每一步比较 caller `CoreDynamic` 前 264 B、global `y[33]` 264 B、main 544 B 和 IPC payload 3000 B，100 步 400 条、1000 步 4000 条均为 0-byte mismatch。
+
+| 场景 | 初始／边界特征 | 100 步 | 1000 步 | gold 双采集 | Makefile 门禁 |
+|---|---|---:|---:|---:|---|
+| **H34** | `a=7,000,000 m`、`e=0`、`i=0`；有限 RAAN/`ω`/`M`；`DynamicDllInit → dyn_init → dyn_main`；零命令；`srand(1)` | PASS | PASS | PASS | `check-h34-circular-equatorial`，已接入 |
+
+| H34 长度 | state SHA-256 | global-y SHA-256 | main SHA-256 | IPC SHA-256 |
+|---:|---|---|---|---|
+| 100 | `0020b6ef808f8147fd134b43b016376043b792ea92b1bd266964548171e96e60` | `33bc14549e803ef2008f0ea7ed7fa68f6047bb93a26b1c7208d4c04562a85af0` | `ea40e249f39358c85f944f3024cd2eab632e745ab762ad88b939ef8ba5e486f7` | `46f0acf67347c0d7474aaf0ce30308cca0209fb3638556ad1d37f6ce4ac8b302` |
+| 1000 | `7ff99e926fa995ecd50ef5e9998985e26f780818089a261c1fe17e07d940909a` | `55466b7bbcaf035ba642a8d8e3a4b123919a7d479ba5d977ce0f3e0efe89876f` | `1ad67a6c114afe29b722530c8a47907f2f5ea16793c2b650256c89c9a2db8b6d` | `d9d5f6aa1cea010253600e19f8fc81510b052b96c342ecd7ab968d0ae68afe1f` |
+
+> **H34 的适用边界。** 该证据只覆盖列出的一个圆赤道根数合同、当前 Linux x86-64、当前运行时、默认严格 C11 构建、单进程无竞争和列明四个观察块。它不证明所有圆/赤道根数、近抛物 `e≈1`、近零半径、任意异常输入、并发、其他平台/编译器或安全关键用途。本工程只限离线研究与仿真，禁止用于飞行、控制、实体执行机构或任何安全关键用途。
+
+## H35 增量记录：`e=0.99` 近抛物高偏心根数启动链
+
+H35 在 `DynamicDllInit` 后覆写根数为 `a=700,000,000 m`、`e=0.99`、`i=0.85 rad`、RAAN `2.30 rad`、近地点幅角 `1.10 rad`、平近点角 `0.37 rad`，再调用 `dyn_init`，以零 caller `core`、零设备命令和 `srand(1)` 连续调用 `dyn_main`。该合同保持 `7,000,000 m` 近地点、`1,393,000,000 m` 远地点和 `sqrt(1-e²)=0.14106735979665884425`，在不越过 `e=1` 的前提下扩展 H32 的高偏心覆盖。
+
+预筛时，main offset `0x1e0` 已按 `DP_TM_ORBIT_ELEMENTS` 的对齐 double 数组解释，而不是把任意 double 半字误扫为 float。初始化 `y`、caller state、global `y` 与 main 已知 double 字段均无 `NaN/Inf`；main 的第一组根数反算为有限的 `a=699999999.9992301`、`e=0.9900000000017579`、`i=0.849999999922629`、RAAN `2.2999999998647374`。随后 100/1000 步的 state、global `y`、main、IPC 四流均完成 first/second 独立采集并逐文件一致；恢复端每步四块比较为 100 步 400 条、1000 步 4000 条，均 0-byte mismatch。
+
+| 场景 | 初始／边界特征 | 100 步 | 1000 步 | gold 双采集 | Makefile 门禁 |
+|---|---|---:|---:|---:|---|
+| **H35** | `a=700,000,000 m`、`e=0.99`、`i=0.85`；近地点 `7,000,000 m`；零命令；`srand(1)`；启动链根数初始化 | PASS | PASS | PASS | `check-h35-near-parabolic`，已接入 |
+
+| H35 长度 | state SHA-256 | global-y SHA-256 | main SHA-256 | IPC SHA-256 |
+|---:|---|---|---|---|
+| 100 | `0c07c099320b234409a4d75cda5ff388f0c9a9e23a0bdee462722c9e02894031` | `e86e101b23050c4f075cffcd85c0dc975a0b5f03e2bda3ac025d2ac75bc416b0` | `a18c69872d190a77904a69752af68bc740134e91581920d65711311574729b71` | `4502751ebb629d903f9b296e20c0da824d0cabe52a97828d8983f4373aac925e` |
+| 1000 | `f0ffe3cde232aed45d8aae14ba00d907f678ae094bfc0d0db56f01cd8b6be0a7` | `f5275542a1219837f9c9ac31cc3c3a01e64dbf392974d57b1127129c48c4df41` | `5e9ba0e34731780c4c8cbb7deef1415f195430d2ed217cbdc662fce84daf535e` | `c556309e04234746be5680eccbadb02d5f2b452197080a9f6f8a44d1523b47d9` |
+
+> **H35 的适用边界。** 该证据仅覆盖列明的 `e=0.99`、当前 Linux x86-64、当前运行时、默认严格 C11 构建、单进程无竞争和四个列明观察块。它不证明 `e=1`、双曲根数、其他近抛物相位、任意半长轴/时长、异常输入、并发、其他平台/编译器或安全关键用途。本工程只限离线研究与仿真，禁止用于飞行、控制、实体执行机构或任何安全关键用途。

@@ -10,7 +10,7 @@ SRC := src/dynamic_math.c src/dynamic_devices.c src/dynamic_device_globals.c src
 OBJ := $(SRC:src/%.c=$(BUILD)/%.o)
 LIB := $(BUILD)/libdynamicpackage_recovered.a
 
-.PHONY: all clean selftest check-h0-fifty check-h0-hundred
+.PHONY: all clean selftest check-h0-fifty check-h15-global-y check-h16-h17-global-y check-h4-h5-h7-global-y check-h26-high-ecc-cross-command check-h27-third-seed-cross-command check-h28-dyn-main-array check-h29-get-desk-command check-h30-startup-chain check-h31-get-desk-lifecycle check-h32-high-ecc-safe-boundary check-h33-ipc-getter-invalid check-h34-circular-equatorial check-h35-near-parabolic
 
 all: $(LIB)
 
@@ -668,14 +668,136 @@ selftest: all
 	$(BUILD)/dyn_main_cross_flex_dss_altseed_command_ten_thousand_step_gold_compare
 	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_cross_flex_dss_altseed_command_hundred_thousand_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_cross_flex_dss_altseed_command_hundred_thousand_step_gold_compare
 	$(BUILD)/dyn_main_cross_flex_dss_altseed_command_hundred_thousand_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_global_orbit_time_boundary_h22_global_y_hundred_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_global_orbit_time_boundary_h22_global_y_hundred_step_gold_compare
+	$(BUILD)/dyn_main_global_orbit_time_boundary_h22_global_y_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_global_orbit_time_boundary_h22_global_y_thousand_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_global_orbit_time_boundary_h22_global_y_thousand_step_gold_compare
+	$(BUILD)/dyn_main_global_orbit_time_boundary_h22_global_y_thousand_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h26_high_ecc_cross_command_hundred_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_h26_high_ecc_cross_command_hundred_step_gold_compare
+	$(BUILD)/dyn_main_h26_high_ecc_cross_command_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h26_high_ecc_cross_command_thousand_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_h26_high_ecc_cross_command_thousand_step_gold_compare
+	$(BUILD)/dyn_main_h26_high_ecc_cross_command_thousand_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h27_high_ecc_cross_command_hundred_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_h27_high_ecc_cross_command_hundred_step_gold_compare
+	$(BUILD)/dyn_main_h27_high_ecc_cross_command_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h27_high_ecc_cross_command_thousand_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_h27_high_ecc_cross_command_thousand_step_gold_compare
+	$(BUILD)/dyn_main_h27_high_ecc_cross_command_thousand_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_array_h28_hundred_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_array_h28_hundred_step_gold_compare
+	$(BUILD)/dyn_main_array_h28_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_array_h28_thousand_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_array_h28_thousand_step_gold_compare
+	$(BUILD)/dyn_main_array_h28_thousand_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/get_desk_command_h29_hundred_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/get_desk_command_h29_hundred_step_gold_compare
+	$(BUILD)/get_desk_command_h29_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/get_desk_command_h29_thousand_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/get_desk_command_h29_thousand_step_gold_compare
+	$(BUILD)/get_desk_command_h29_thousand_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_startup_chain_h30_hundred_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/dyn_main_startup_chain_h30_hundred_step_gold_compare
+	$(BUILD)/dyn_main_startup_chain_h30_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_startup_chain_h30_thousand_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/dyn_main_startup_chain_h30_thousand_step_gold_compare
+	$(BUILD)/dyn_main_startup_chain_h30_thousand_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/get_desk_command_h31_lifecycle_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/get_desk_command_h31_lifecycle_gold_compare
+	$(BUILD)/get_desk_command_h31_lifecycle_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h32_high_ecc_safe_boundary_hundred_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/dyn_main_h32_high_ecc_safe_boundary_hundred_step_gold_compare
+	$(BUILD)/dyn_main_h32_high_ecc_safe_boundary_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h32_high_ecc_safe_boundary_thousand_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/dyn_main_h32_high_ecc_safe_boundary_thousand_step_gold_compare
+	$(BUILD)/dyn_main_h32_high_ecc_safe_boundary_thousand_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/ipc_getter_h33_invalid_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/ipc_getter_h33_invalid_gold_compare
+	$(BUILD)/ipc_getter_h33_invalid_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h34_circular_equatorial_hundred_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/dyn_main_h34_circular_equatorial_hundred_step_gold_compare
+	$(BUILD)/dyn_main_h34_circular_equatorial_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h34_circular_equatorial_thousand_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/dyn_main_h34_circular_equatorial_thousand_step_gold_compare
+	$(BUILD)/dyn_main_h34_circular_equatorial_thousand_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h35_near_parabolic_hundred_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/dyn_main_h35_near_parabolic_hundred_step_gold_compare
+	$(BUILD)/dyn_main_h35_near_parabolic_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h35_near_parabolic_thousand_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/dyn_main_h35_near_parabolic_thousand_step_gold_compare
+	$(BUILD)/dyn_main_h35_near_parabolic_thousand_step_gold_compare
 
 check-h0-fifty: all
 	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_high_ecc_shadow_adjacent_date_fifty_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_high_ecc_shadow_adjacent_date_fifty_step_gold_compare
 	$(BUILD)/dyn_main_high_ecc_shadow_adjacent_date_fifty_step_gold_compare
 
-check-h0-hundred: all
-	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_high_ecc_shadow_adjacent_date_hundred_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_high_ecc_shadow_adjacent_date_hundred_step_gold_compare
-	$(BUILD)/dyn_main_high_ecc_shadow_adjacent_date_hundred_step_gold_compare
+check-h15-global-y: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_global_orbit_time_boundary_h22_global_y_hundred_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_global_orbit_time_boundary_h22_global_y_hundred_step_gold_compare
+	$(BUILD)/dyn_main_global_orbit_time_boundary_h22_global_y_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_global_orbit_time_boundary_h22_global_y_thousand_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_global_orbit_time_boundary_h22_global_y_thousand_step_gold_compare
+	$(BUILD)/dyn_main_global_orbit_time_boundary_h22_global_y_thousand_step_gold_compare
+
+check-h16-h17-global-y: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_global_leap_day_leo_hundred_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_global_leap_day_leo_hundred_step_gold_compare
+	$(BUILD)/dyn_main_global_leap_day_leo_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_global_leap_day_leo_thousand_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_global_leap_day_leo_thousand_step_gold_compare
+	$(BUILD)/dyn_main_global_leap_day_leo_thousand_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_global_zero_hundred_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_global_zero_hundred_step_gold_compare
+	$(BUILD)/dyn_main_global_zero_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_global_zero_thousand_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_global_zero_thousand_step_gold_compare
+	$(BUILD)/dyn_main_global_zero_thousand_step_gold_compare
+
+check-h26-high-ecc-cross-command: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h26_high_ecc_cross_command_hundred_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_h26_high_ecc_cross_command_hundred_step_gold_compare
+	$(BUILD)/dyn_main_h26_high_ecc_cross_command_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h26_high_ecc_cross_command_thousand_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_h26_high_ecc_cross_command_thousand_step_gold_compare
+	$(BUILD)/dyn_main_h26_high_ecc_cross_command_thousand_step_gold_compare
+
+check-h27-third-seed-cross-command: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h27_high_ecc_cross_command_hundred_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_h27_high_ecc_cross_command_hundred_step_gold_compare
+	$(BUILD)/dyn_main_h27_high_ecc_cross_command_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h27_high_ecc_cross_command_thousand_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_h27_high_ecc_cross_command_thousand_step_gold_compare
+	$(BUILD)/dyn_main_h27_high_ecc_cross_command_thousand_step_gold_compare
+
+check-h28-dyn-main-array: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_array_h28_hundred_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_array_h28_hundred_step_gold_compare
+	$(BUILD)/dyn_main_array_h28_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_array_h28_thousand_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_array_h28_thousand_step_gold_compare
+	$(BUILD)/dyn_main_array_h28_thousand_step_gold_compare
+
+check-h29-get-desk-command: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/get_desk_command_h29_hundred_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/get_desk_command_h29_hundred_step_gold_compare
+	$(BUILD)/get_desk_command_h29_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/get_desk_command_h29_thousand_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/get_desk_command_h29_thousand_step_gold_compare
+	$(BUILD)/get_desk_command_h29_thousand_step_gold_compare
+
+check-h30-startup-chain: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_startup_chain_h30_hundred_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/dyn_main_startup_chain_h30_hundred_step_gold_compare
+	$(BUILD)/dyn_main_startup_chain_h30_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_startup_chain_h30_thousand_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/dyn_main_startup_chain_h30_thousand_step_gold_compare
+	$(BUILD)/dyn_main_startup_chain_h30_thousand_step_gold_compare
+
+check-h31-get-desk-lifecycle: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/get_desk_command_h31_lifecycle_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/get_desk_command_h31_lifecycle_gold_compare
+	$(BUILD)/get_desk_command_h31_lifecycle_gold_compare
+
+check-h32-high-ecc-safe-boundary: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h32_high_ecc_safe_boundary_hundred_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/dyn_main_h32_high_ecc_safe_boundary_hundred_step_gold_compare
+	$(BUILD)/dyn_main_h32_high_ecc_safe_boundary_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h32_high_ecc_safe_boundary_thousand_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/dyn_main_h32_high_ecc_safe_boundary_thousand_step_gold_compare
+	$(BUILD)/dyn_main_h32_high_ecc_safe_boundary_thousand_step_gold_compare
+
+check-h33-ipc-getter-invalid: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/ipc_getter_h33_invalid_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/ipc_getter_h33_invalid_gold_compare
+	$(BUILD)/ipc_getter_h33_invalid_gold_compare
+
+check-h34-circular-equatorial: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h34_circular_equatorial_hundred_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/dyn_main_h34_circular_equatorial_hundred_step_gold_compare
+	$(BUILD)/dyn_main_h34_circular_equatorial_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h34_circular_equatorial_thousand_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/dyn_main_h34_circular_equatorial_thousand_step_gold_compare
+	$(BUILD)/dyn_main_h34_circular_equatorial_thousand_step_gold_compare
+
+check-h35-near-parabolic: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h35_near_parabolic_hundred_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/dyn_main_h35_near_parabolic_hundred_step_gold_compare
+	$(BUILD)/dyn_main_h35_near_parabolic_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_h35_near_parabolic_thousand_step_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/dyn_main_h35_near_parabolic_thousand_step_gold_compare
+	$(BUILD)/dyn_main_h35_near_parabolic_thousand_step_gold_compare
+
+check-h4-h5-h7-global-y: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_global_noncollinear_multi_actuator_hundred_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_global_noncollinear_multi_actuator_hundred_step_gold_compare
+	$(BUILD)/dyn_main_global_noncollinear_multi_actuator_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_global_noncollinear_multi_actuator_thousand_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_global_noncollinear_multi_actuator_thousand_step_gold_compare
+	$(BUILD)/dyn_main_global_noncollinear_multi_actuator_thousand_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_global_sada_saturation_hundred_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_global_sada_saturation_hundred_step_gold_compare
+	$(BUILD)/dyn_main_global_sada_saturation_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_global_sada_saturation_thousand_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_global_sada_saturation_thousand_step_gold_compare
+	$(BUILD)/dyn_main_global_sada_saturation_thousand_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_global_noncollinear_flex_sada_flag1_hundred_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_global_noncollinear_flex_sada_flag1_hundred_step_gold_compare
+	$(BUILD)/dyn_main_global_noncollinear_flex_sada_flag1_hundred_step_gold_compare
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/dyn_main_global_noncollinear_flex_sada_flag1_thousand_step_compare.c $(LIB) -lm -o $(BUILD)/dyn_main_global_noncollinear_flex_sada_flag1_thousand_step_gold_compare
+	$(BUILD)/dyn_main_global_noncollinear_flex_sada_flag1_thousand_step_gold_compare
 
 clean:
 	rm -rf $(BUILD)

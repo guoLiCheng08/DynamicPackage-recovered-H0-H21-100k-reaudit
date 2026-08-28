@@ -1,6 +1,6 @@
-# H0–H21 当前平台输入输出覆盖审计
+# H0–H35 当前平台输入输出覆盖审计
 
-**审计日期：** 2026-08-24（H21 已扩展至 100／1,000／10,000／100,000 步）
+**审计日期：** 2026-08-26（主 `dyn_main` 已扩展至 H0–H21、H26、H27、H30、H32；H28 已补齐 `dyn_main_array`，H29/H31 已补齐 `getDeskCommand` 连续与生命周期入口差分，H33 已补齐共享 IPC getter 的无效索引／空输出／自动重开合同，H34 已补齐圆赤道根数启动链主传播，H35 已补齐 `e=0.99` 近抛物高偏心根数启动链主传播）
 
 > 本文量化的是当前 Linux x86-64、当前运行时库、严格 C11 构建和固定受控输入下，恢复 C 与只读原 ELF 已建立 gold 的逐步字节比较范围。它不将有限序列外推为任意输入、任意长度命令、并发或数学全域的一致性证明。
 
@@ -11,10 +11,10 @@
 | 原 ELF 文件 | `input/DynamicPackage.elf` |
 | 文件权限 | `0400` |
 | SHA-256 | `312678a62afcb64ff9d198d7311db39bece432702cdfb00830d8439d24906403` |
-| H21 既有 Git 基线 | `1cb32ba`；本次 10,000／100,000 步取证/回归改动待单独中文提交 |
+| H32–H35 取证状态 | H32：`a=42,000,000 m`、`e=0.75` 安全高偏心根数组合已单步预筛并完成 100／1,000 步四块双采集 PASS；H33：IPC getter 无效索引／空输出／自动重开合同已双采集 PASS；H34：`a=7,000,000 m`、`e=0`、`i=0` 圆赤道根数启动链已完成 100／1,000 步四块双采集 PASS；H35：`a=700,000,000 m`、`e=0.99` 近抛物高偏心根数启动链已完成字段对齐预筛及 100／1,000 步四块双采集 PASS |
 | 默认严格构建 | `-std=c11 -O0 -g -Wall -Wextra -Wpedantic -Werror -fno-fast-math -ffp-contract=off` |
-| 当前重跑门禁 | `make clean && make selftest` 通过；313 条 PASS、0 个错误标记 |
-| 默认测试可执行项 | 322 |
+| 当前重跑门禁 | `make clean && make selftest` 通过；333 条 PASS、0 个错误标记 |
+| 默认测试可执行项 | 342 |
 
 ## 2. 受控输入序列数量
 
@@ -45,14 +45,14 @@
 
 | 观察块 | 已覆盖场景 | 每步大小 | 逐步块数 | 逐步字节数 | 结论 |
 |---|---:|---:|---:|---:|---|
-| caller `CoreDynamic` 前 0x108 | 22/22 | 264 B | 134,200 | 35,428,800 B | 全场景逐步 `memcmp` |
-| main telemetry | 22/22 | 544 B | 134,200 | 73,004,800 B | 全场景逐步 `memcmp` |
-| IPC payload | 22/22 | 3,000 B | 134,200 | 402,600,000 B | 全场景逐步 `memcmp` |
-| global `y[33]` | 12/22 | 264 B | 123,200 | 32,524,800 B | H0/H1/H2/H6/H11–H14/H18–H21；其他 10 场景未建此块 gold |
-| 终态执行机构快照 | H18–H21 | 1,088 B/场景长度 | 70 份 | 10,880 B | RWheel、MTQ、Thruster 与四个三元向量 |
-| **合计** | — | — | **525,878 次显式比较操作** | **543,569,280 B** | 只计上述已建立 gold 的块 |
+| caller `CoreDynamic` 前 0x108 | 28/28 | 264 B | 140,800 | 37,171,200 B | 全部主路径逐步 `memcmp` |
+| main telemetry | 28/28 | 544 B | 140,800 | 76,595,200 B | 全部主路径逐步 `memcmp` |
+| IPC payload | 28/28 | 3,000 B | 140,800 | 422,400,000 B | 全部主路径逐步 `memcmp` |
+| global `y[33]` | 28/28 | 264 B | 140,800 | 37,171,200 B | 全部主路径均已建立并逐步比较此块 gold |
+| 终态执行机构快照 | H18–H21、H26/H27 | 1,088 B/场景长度 | 98 份 | 15,232 B | RWheel、MTQ、Thruster 与四个三元向量 |
+| **合计** | — | — | **568,788 次显式比较操作** | **574,594,185 B** | 含 H28 legacy 两块、H29 IPC 三块、H30 四块、H31 生命周期六块、H32 四块、H33 IPC getter 四块、H34 四块与 H35 四块 gold |
 
-所有长时域场景共有块的逐步比较为 `CoreDynamic + main + IPC = 3,808 B/步`，在 134,200 个步骤上共比较 511,793,600 B。内部 `global y` 只在 12 个场景建立原 ELF gold；不能把其余 10 场景称为已验证该内部块。
+全部结构化主 `dyn_main` 路径现均对 `CoreDynamic + global y + main + IPC = 4,072 B/步` 建立逐步原 ELF gold。28 个主路径的 140,800 个步骤四块比较共计 573,337,600 B，另有 H18–H21 与 H26/H27 的 15,232 B 终态执行机构快照；H28 另以 legacy output/state 两块在 1,100 步比较 1,100,000 B；H29 另以 flags/init-tail/DRC 三块在 1,100 步比较 140,800 B；H31 另以两阶段 flags/init-tail/DRC 六块比较 512 B；H33 另以返回码、无效 float 哨兵、自动重开 float 输出与无效 uint8 哨兵四块比较 41 B。
 
 ## 5. H21 新增路径与超长时域结果
 
@@ -75,17 +75,20 @@ H21 的 10,000 与 100,000 步比较器均已加入默认 Makefile 门禁。从�
 
 ## 6. 当前可作出的结论与不能作出的结论
 
-在 H0–H21 所列输入、种子、平台、严格编译选项及上述观察块内，恢复 C 与原 ELF 的已建 gold 轨迹均为逐字节一致；其中 H21 的独立第二 LCG 命令序列已连续验证至 100,000 步。最新空构建默认回归也通过。这是目前有直接双采集原 ELF gold 支持的结论。
+在 H0–H21、H26、H27、H30、H32、H34、H35 所列结构化 `dyn_main` 输入，以及 H28 旧式数组 ABI、H29 连续共享 IPC、H31 共享 IPC 生命周期与 H33 getter 无效索引／空输出／自动重开输入、种子、平台、严格编译选项及观察块内，恢复 C 与原 ELF 的已建 gold 轨迹均为逐字节一致；其中 H21 的独立第二 LCG 命令序列已连续验证至 100,000 步，H28–H30、H32、H34 与 H35 已验证至 1,000 步，H31 已验证固定无竞争打开/关闭/重开序列，H33 已验证固定 getter 错误返回与输出保持合同。最新空构建默认回归也通过。这是目前有直接双采集原 ELF gold 支持的结论。
 
-不能据此声称所有 33 个连续双精度状态、每一个命令帧数值、所有随机种子、无限长度命令序列、所有未观测对象、并发时序或所有数学边界均已穷尽。后续新场景必须继续遵循“反汇编/接口审计 → 原 ELF 双采集 → 逐步 bitwise 差分 → 默认严格回归”的流程。
+不能据此声称所有 33 个连续双精度状态、每一个命令帧数值、所有随机种子、无限长度命令序列、所有未观测对象、并发时序或所有数学边界均已穷尽。H28 已证明主 `dyn_main` 的通过不能自动外推至另一 ABI；后续新场景与入口必须继续遵循“反汇编/接口审计 → 原 ELF 双采集 → 逐步 bitwise 差分 → 默认严格回归”的流程。
 
 ## 7. 证据入口
 
 - 覆盖矩阵：`analysis/coverage_inventory/long_horizon_matrix_h0_h1.md`
-- 当前严格门禁日志：`analysis/coverage_inventory/full_clean_selftest_with_h21_long_horizon_10k_100k_gates.log`
+- 当前严格门禁摘要：`analysis/coverage_inventory/h35_full_selftest_summary_20260826.log`
 - H21 输入选择：`analysis/coverage_inventory/h21_alt_lcg_seed_cross_path_plan.md`
 - H21 10,000 步原 ELF 采集日志：`analysis/time_orbit/h21_ten_thousand_{first,second}_capture.log`
 - H21 100,000 步原 ELF 采集日志：`analysis/time_orbit/h21_hundred_thousand_{first,second}_capture.log`
 - H21 恢复端长时域差分：`analysis/coverage_inventory/h21_{ten,hundred}_thousand_recovered_compare.log`
+- H33 IPC getter 错误合同：`analysis/coverage_inventory/h33_ipc_getter_invalid_result_20260825.md`
+- H34 圆赤道根数主传播：`analysis/coverage_inventory/h34_circular_equatorial_result_20260825.md`
+- H35 近抛物高偏心根数主传播：`analysis/coverage_inventory/h35_near_parabolic_result_20260826.md`
 - 连续取证：`analysis/time_orbit/h0_thousand_nan_sign_investigation.md`
 - 当前源：`src/`；默认门禁：`Makefile`

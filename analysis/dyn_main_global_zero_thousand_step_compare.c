@@ -120,23 +120,29 @@ int main(void)
     unsigned char *expected_states = NULL;
     unsigned char *expected_main = NULL;
     unsigned char *expected_ipc = NULL;
+    unsigned char *expected_global_y = NULL;
     unsigned step;
     int mismatch = 0;
 
     expected_states = malloc(STEP_COUNT * STATE_BYTES);
     expected_main = malloc(STEP_COUNT * MAIN_BYTES);
     expected_ipc = malloc(STEP_COUNT * IPC_PAYLOAD_BYTES);
+    expected_global_y = malloc(STEP_COUNT * STATE_BYTES);
     if (expected_states == NULL || expected_main == NULL || expected_ipc == NULL ||
+        expected_global_y == NULL ||
         read_gold("gold_sensor_init_gyro.bin", DeviceMeasure.gyro, sizeof(DeviceMeasure.gyro)) ||
         read_gold("gold_sensor_init_magmeter.bin", DeviceMeasure.magmeter, sizeof(DeviceMeasure.magmeter)) ||
         read_gold("gold_sensor_init_sts.bin", DeviceMeasure.sts, sizeof(DeviceMeasure.sts)) ||
         read_gold("gold_sensor_init_dss.bin", DeviceMeasure.dss, sizeof(DeviceMeasure.dss)) ||
         read_gold("gold_zero_thousand_step_state.bin", expected_states, STEP_COUNT * STATE_BYTES) ||
         read_gold("gold_zero_thousand_step_out.bin", expected_main, STEP_COUNT * MAIN_BYTES) ||
-        read_gold("gold_zero_thousand_step_ipc_payload.bin", expected_ipc, STEP_COUNT * IPC_PAYLOAD_BYTES)) {
+        read_gold("gold_zero_thousand_step_ipc_payload.bin", expected_ipc, STEP_COUNT * IPC_PAYLOAD_BYTES) ||
+        read_gold("gold_zero_h23_global_y_thousand_first_global_y.bin", expected_global_y,
+                  STEP_COUNT * STATE_BYTES)) {
         free(expected_states);
         free(expected_main);
         free(expected_ipc);
+        free(expected_global_y);
         return 1;
     }
 
@@ -147,6 +153,7 @@ int main(void)
         free(expected_states);
         free(expected_main);
         free(expected_ipc);
+        free(expected_global_y);
         return 1;
     }
     setup_initial(&initial);
@@ -172,11 +179,14 @@ int main(void)
         (void)snprintf(label, sizeof(label), "H17 zero-command thousand-step[%u] IPC payload", step + 1u);
         mismatch |= compare_blob(label, actual_ipc.raw + DP_IPC_FLOAT_BASE,
                                  expected_ipc + step * IPC_PAYLOAD_BYTES, IPC_PAYLOAD_BYTES);
+        (void)snprintf(label, sizeof(label), "H17 H23 global-y thousand-step[%u] global y", step + 1u);
+        mismatch |= compare_blob(label, y, expected_global_y + step * STATE_BYTES, STATE_BYTES);
     }
 
     free(expected_states);
     free(expected_main);
     free(expected_ipc);
+    free(expected_global_y);
     if (mismatch == 0) {
         puts("dyn_main H17 zero-command thousand-step original-ELF compare: PASS (bitwise)");
     }
