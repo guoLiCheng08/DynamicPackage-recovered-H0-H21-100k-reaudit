@@ -291,7 +291,7 @@ int main(int argc, char **argv)
                 break;
             }
             /* 入口断点停住后等待指定输入，保证 ELF 不会消费旧帧。 */
-            if (expected_input_sequence != 0u &&
+            if (captured == 0u && expected_input_sequence != 0u &&
                 wait_for_input_sequence(input_frame, expected_input_sequence) != 0) {
                 fprintf(stderr, "等待 ELF 输入序号 %u 超时，当前=%u\n",
                         expected_input_sequence, input_frame->sequence);
