@@ -192,6 +192,7 @@ int main(int argc, char **argv)
     int entry_breakpoint = 0;
     int return_breakpoint = 0;
     const char *ready_path = getenv("ELF_TRACE_READY_FILE");
+    const char *rng_arm_path = getenv("ELF_RNG_ARM_FILE");
     const char *state_log_path = getenv("ELF_STATE_LOG");
     FILE *state_log = NULL;
     int state_fd;
@@ -286,12 +287,16 @@ int main(int argc, char **argv)
                 __atomic_store_n(&state_frame->seed_ready,
                                  DP_C_SHADOW_SEED_READY, __ATOMIC_RELEASE);
             }
+            if (captured == 0u && rng_arm_path != NULL && rng_arm_path[0] != '\0') {
+                FILE *arm = fopen(rng_arm_path, "w");
+                if (arm != NULL) fclose(arm);
+            }
             if (captured == 0u && clear_elf_ipc_payload(pid) != 0) {
                 fprintf(stderr, "无法清零 ELF 输出共享区\n");
                 break;
             }
             /* 入口断点停住后等待指定输入，保证 ELF 不会消费旧帧。 */
-            if (captured == 0u && expected_input_sequence != 0u &&
+            if (expected_input_sequence != 0u &&
                 wait_for_input_sequence(input_frame, expected_input_sequence) != 0) {
                 fprintf(stderr, "等待 ELF 输入序号 %u 超时，当前=%u\n",
                         expected_input_sequence, input_frame->sequence);
@@ -334,11 +339,16 @@ int main(int argc, char **argv)
             (void)fflush(state_log);
         }
         ++captured;
+        if (expected_input_sequence != 0u)
+            expected_input_sequence = input_frame->sequence + 1u;
         return_breakpoint = 0;
         entry_breakpoint = 1;
     }
     if (entry_breakpoint != 0) (void)restore_word(pid, base + ELF_DYN_MAIN_OFFSET, entry_saved);
     if (return_breakpoint != 0) (void)restore_word(pid, return_address, return_saved);
+    /* 采样结束后立即停止 ELF 随机数记录，避免脱离采样器后的运行数据混入回放文件。 */
+    if (rng_arm_path != NULL && rng_arm_path[0] != '\0')
+        (void)unlink(rng_arm_path);
     (void)ptrace(PTRACE_DETACH, pid, NULL, NULL);
     if (state_log != NULL) (void)fclose(state_log);
     if (state_frame != MAP_FAILED) (void)munmap(state_frame, sizeof(*state_frame));

@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 static FILE *dp_rng_replay_file;
 static int dp_rng_error;
@@ -40,7 +41,17 @@ int dp_rng_next(int32_t *value)
 {
     if (value == NULL) return -1;
     if (dp_rng_replay_file != NULL) {
-        if (fread(value, sizeof(*value), 1u, dp_rng_replay_file) != 1u) {
+        unsigned attempt;
+        for (attempt = 0u; attempt < 5000u; ++attempt) {
+            if (fread(value, sizeof(*value), 1u, dp_rng_replay_file) == 1u)
+                break;
+            clearerr(dp_rng_replay_file);
+            {
+                const struct timespec delay = {0, 1000000};
+                nanosleep(&delay, NULL);
+            }
+        }
+        if (attempt == 5000u) {
             dp_rng_error = 1;
             return -1;
         }
