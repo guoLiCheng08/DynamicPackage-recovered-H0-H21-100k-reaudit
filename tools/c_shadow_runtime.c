@@ -35,11 +35,19 @@ static void fill_device_snapshot(uint8_t snapshot[DP_DEVICE_GLOBAL_SNAPSHOT_BYTE
     memcpy(snapshot + 0x1268u, MTQ, 0x150u);
     memcpy(snapshot + 0x13b8u, &Thruster, 0xb0u);
     memcpy(snapshot + 0x1468u, &WheelGroup, 0xc8u);
+    memcpy(snapshot + 0x1468u + 0x10u, WheelGroup.angular_momentum.data,
+           3u * sizeof(double));
+    memcpy(snapshot + 0x1468u + 0x38u, WheelGroup.torque.data,
+           3u * sizeof(double));
     /* ELF 将 3x4 群组映射紧随 WheelGroup descriptor 保存；C 使用独立
      * backing，导出快照时转换为同一可比较布局。 */
     memcpy(snapshot + 0x1468u + 0x68u, WheelGroup.mapping_3x4.data,
            12u * sizeof(double));
     memcpy(snapshot + 0x1530u, &MTQ_Group, 0x110u);
+    memcpy(snapshot + 0x1530u + 0x10u, MTQ_Group.group_moment.data,
+           3u * sizeof(double));
+    memcpy(snapshot + 0x1530u + 0x38u, MTQ_Group.channel_moment.data,
+           6u * sizeof(double));
     /* 同上：ELF 的 3x6 MTQ 映射位于对象 +0x80。 */
     memcpy(snapshot + 0x1530u + 0x80u, MTQ_Group.mapping_3x6.data,
            18u * sizeof(double));
@@ -100,7 +108,7 @@ static void clear_ipc_output(void)
 
 static int open_replay_frame(DpShadowReplayFrame **out_frame, int *out_fd)
 {
-    int fd = shm_open(DP_SHADOW_INPUT_SHM, O_CREAT | O_RDWR, 0600);
+    int fd = shm_open(dp_shadow_input_shm_name(), O_CREAT | O_RDWR, 0600);
     DpShadowReplayFrame *frame;
 
     if (fd < 0 || ftruncate(fd, (off_t)sizeof(*frame)) != 0) return -1;
@@ -140,13 +148,13 @@ static void wait_for_elf_step(const DpCShadowStateFrame *elf_seed_frame,
     }
 }
 
-static int wait_for_rng_sample(const char *path, uint64_t consumed)
+static int wait_for_rng_count(const char *path, uint64_t required)
 {
     unsigned attempts = 0u;
     while (running != 0 && path != NULL && path[0] != '\0' && attempts < 30000u) {
         struct stat info;
         if (stat(path, &info) == 0 &&
-            (uint64_t)info.st_size >= (consumed + 1u) * sizeof(int32_t)) {
+            (uint64_t)info.st_size >= required * sizeof(int32_t)) {
             return 0;
         }
         {
@@ -204,7 +212,7 @@ int main(int argc, char **argv)
     (void)signal(SIGINT, stop_runtime);
     (void)signal(SIGTERM, stop_runtime);
 
-    fd = shm_open(DP_C_SHADOW_STATE_SHM, O_CREAT | O_RDWR, 0600);
+    fd = shm_open(dp_c_shadow_state_shm_name(), O_CREAT | O_RDWR, 0600);
     if (fd < 0 || ftruncate(fd, (off_t)sizeof(*frame)) != 0) return 2;
     frame = mmap(NULL, sizeof(*frame), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (frame == MAP_FAILED) return 2;
@@ -313,13 +321,24 @@ int main(int argc, char **argv)
             __atomic_store_n(&elf_seed_frame->post_ack, (uint32_t)steps,
                              __ATOMIC_RELEASE);
         }
-        /* ELF 在完成同一积分步后才产生该步的随机测量；等待记录出现，
-         * 但不提前读取 ELF 的后一步状态，保证 C 与 ELF 仍按同一初态积分。 */
-        if (seed_from_elf && rng_replay_path != NULL &&
-            wait_for_rng_sample(rng_replay_path, dp_rng_count()) != 0) {
-            fprintf(stderr, "等待 ELF 随机数记录超时，已消耗=%llu\n",
-                    (unsigned long long)dp_rng_count());
-            break;
+        if (seed_from_elf && rng_replay_path != NULL) {
+            uint64_t required_rng_count;
+
+            /* C 不读取 ELF 的积分结果；只等待同一输入序号的 ELF 步完成，
+             * 取得该步 rand() 记录的长度。这样随机输入是完整的一步序列，
+             * 不会在 ELF 尚在写入时被 C 读到半帧。 */
+            wait_for_elf_step(elf_seed_frame, (uint32_t)steps + 1u);
+            required_rng_count = elf_seed_frame->reserved;
+            if (wait_for_rng_count(rng_replay_path, required_rng_count) != 0) {
+                fprintf(stderr, "等待 ELF 随机数记录超时，目标=%llu 已消耗=%llu\n",
+                        (unsigned long long)required_rng_count,
+                        (unsigned long long)dp_rng_count());
+                break;
+            }
+            /* 严格回放以 ELF 在本拍 dyn_main 入口实际使用的控制结构为准。
+             * 这仅消除 PC 输入线程与积分线程之间的时序差，不读取任何 ELF
+             * 积分结果；请求命令与该结构的差异由测试报告单独记录。 */
+            command = elf_seed_frame->applied_command;
         }
         memset(&telemetry, 0, sizeof(telemetry));
         dyn_main(&telemetry, core_output, &command);

@@ -5,6 +5,7 @@
 #include "shadow_replay_ipc.h"
 
 #include <errno.h>
+#include <math.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,8 +29,52 @@
 #define ELF_TIME_SECOND_TOTAL_OFFSET 0x218688u
 #define ELF_TIME_CALENDAR_OFFSET 0x2186a0u
 #define ELF_TIME_TM_OFFSET 0x218be0u
+#define ELF_DEVICE_COMMAND_BYTES 0x78u
 
 static int read_process_bytes(pid_t pid, unsigned long address, void *buffer, size_t bytes);
+
+static void write_command_trace(FILE *trace, uint32_t sequence,
+                                const uint8_t command[ELF_DEVICE_COMMAND_BYTES])
+{
+    double wheel[4];
+    double mtq[6];
+    double sada[2];
+    uint32_t sada_flag;
+    uint32_t thruster_flag;
+    uint32_t inertia_flag;
+
+    if (trace == NULL || command == NULL) return;
+    memcpy(wheel, command + 0x08u, sizeof(wheel));
+    memcpy(mtq, command + 0x28u, sizeof(mtq));
+    memcpy(&sada_flag, command + 0x58u, sizeof(sada_flag));
+    memcpy(sada, command + 0x60u, sizeof(sada));
+    memcpy(&thruster_flag, command + 0x70u, sizeof(thruster_flag));
+    memcpy(&inertia_flag, command + 0x74u, sizeof(inertia_flag));
+    (void)fprintf(trace,
+                  "%u wheel=%.9g,%.9g,%.9g,%.9g mtq=%.9g,%.9g,%.9g,%.9g,%.9g,%.9g "
+                  "sada_flag=%u sada=%.9g,%.9g thruster=%u inertia=%u\n",
+                  sequence, wheel[0], wheel[1], wheel[2], wheel[3],
+                  mtq[0], mtq[1], mtq[2], mtq[3], mtq[4], mtq[5],
+                  sada_flag, sada[0], sada[1], thruster_flag, inertia_flag);
+    (void)fflush(trace);
+}
+
+static int seed_snapshot_initialized(const DpCShadowStateFrame *frame)
+{
+    double current_angle[2];
+    double command_limit[2];
+
+    /* dyn_init 之前也会进入一次 dyn_main。仅 state[0] 为 1 还不足以说明
+     * 执行机构已初始化：SADA 的初始角度与限幅是同一固定初态的一部分。 */
+    memcpy(current_angle, frame->seed_device_globals + 0x1020u + 0x18u,
+           sizeof(current_angle));
+    memcpy(command_limit, frame->seed_device_globals + 0x1020u + 0x48u,
+           sizeof(command_limit));
+    return fabs(frame->state[0] - 1.0) <= 0.1 &&
+           fabs(current_angle[0] - 3.14159265358979323846) <= 0.01 &&
+           fabs(current_angle[1] - 3.14159265358979323846) <= 0.01 &&
+           command_limit[0] > 0.0 && command_limit[1] > 0.0;
+}
 
 static int read_device_snapshot(pid_t pid, unsigned long base,
                                 uint8_t snapshot[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES])
@@ -226,6 +271,8 @@ int main(int argc, char **argv)
         ? (uint32_t)strtoul(argv[3], NULL, 10) : 0u;
     uint32_t active_input_sequence = 0u;
     unsigned captured = 0u;
+    int warmup_pending = getenv("ELF_TRACE_WARMUP_STEP") != NULL;
+    int seed_published = 0;
     int status;
     int entry_breakpoint = 0;
     int return_breakpoint = 0;
@@ -234,6 +281,9 @@ int main(int argc, char **argv)
     const char *state_log_path = getenv("ELF_STATE_LOG");
     const char *state_shm_name = getenv("ELF_C_SHADOW_STATE_SHM");
     FILE *state_log = NULL;
+    FILE *command_trace = NULL;
+    uint8_t active_command[ELF_DEVICE_COMMAND_BYTES] = {0};
+    unsigned long active_command_address = 0u;
     int state_fd;
     DpCShadowStateFrame *state_frame;
     DpShadowReplayFrame *input_frame;
@@ -253,7 +303,7 @@ int main(int argc, char **argv)
         return 3;
     }
     state_fd = shm_open(state_shm_name, O_CREAT | O_RDWR, 0600);
-    input_fd = shm_open(DP_SHADOW_INPUT_SHM, O_RDONLY, 0);
+    input_fd = shm_open(dp_shadow_input_shm_name(), O_RDONLY, 0);
     if (state_fd < 0 || input_fd < 0 ||
         ftruncate(state_fd, (off_t)sizeof(*state_frame)) != 0) {
         fprintf(stderr, "无法建立 ELF 状态/输入映射\n");
@@ -295,6 +345,18 @@ int main(int argc, char **argv)
             return 3;
         }
     }
+    {
+        const char *command_trace_path = getenv("ELF_COMMAND_TRACE_FILE");
+        if (command_trace_path != NULL && command_trace_path[0] != '\0') {
+            command_trace = fopen(command_trace_path, "w");
+            if (command_trace == NULL) {
+                if (state_log != NULL) (void)fclose(state_log);
+                (void)restore_word(pid, base + ELF_DYN_MAIN_OFFSET, entry_saved);
+                (void)ptrace(PTRACE_DETACH, pid, NULL, NULL);
+                return 3;
+            }
+        }
+    }
     if (touch_ready_file(ready_path) != 0) {
         fprintf(stderr, "无法写入 ELF 采样器就绪文件\n");
         (void)restore_word(pid, base + ELF_DYN_MAIN_OFFSET, entry_saved);
@@ -314,18 +376,30 @@ int main(int argc, char **argv)
             fprintf(stderr, "等待正式ELF失败: %s\n", strerror(errno));
             break;
         }
+        if (WIFSTOPPED(status) && WSTOPSIG(status) == SIGSTOP) {
+            /* 启动闸门/ptrace 组合可能留下待处理的 SIGSTOP；该信号不是模型
+             * 返回点，继续执行后仍等待同一断点。 */
+            continue;
+        }
         if (!WIFSTOPPED(status) || WSTOPSIG(status) != SIGTRAP) {
             fprintf(stderr, "正式ELF非断点停止: status=0x%x\n", status);
             break;
         }
+        if (ptrace(PTRACE_GETREGS, pid, NULL, &regs) != 0) break;
+        /* ELF 启动和动态链接阶段也可能产生 SIGTRAP。只有 RIP 精确落在
+         * 本工具写入的 dyn_main 入口或返回断点，才能作为状态采样边界。 */
+        if ((entry_breakpoint != 0 && regs.rip != base + ELF_DYN_MAIN_OFFSET + 1u) ||
+            (return_breakpoint != 0 && regs.rip != return_address + 1u)) {
+            continue;
+        }
         if (return_breakpoint == 0) {
-            if (ptrace(PTRACE_GETREGS, pid, NULL, &regs) != 0) break;
             return_address = (unsigned long)ptrace(PTRACE_PEEKDATA, pid,
                                                    (void *)regs.rsp, NULL);
             if (return_address == (unsigned long)-1 ||
                 restore_word(pid, base + ELF_DYN_MAIN_OFFSET, entry_saved) != 0 ||
                 patch_byte(pid, return_address, &return_saved) != 0) break;
             /* 入口断点处保存同一拍的积分前状态，供 C 影子复用。 */
+            active_command_address = regs.rdx;
             for (unsigned index = 0u; index < DP_STATE_DIM; ++index) {
                 errno = 0;
                 unsigned long low = (unsigned long)ptrace(
@@ -334,7 +408,8 @@ int main(int argc, char **argv)
                 if (errno != 0) break;
                 memcpy(&state_frame->state[index], &low, sizeof(low));
             }
-            if (read_process_double(pid, base + ELF_T_OFFSET,
+            if (seed_published == 0 && warmup_pending == 0 &&
+                read_process_double(pid, base + ELF_T_OFFSET,
                                     &state_frame->seed_integration_time) == 0) {
                 (void)read_process_double(pid, base + ELF_TIME_SECOND_DECIMAL_OFFSET,
                                           &state_frame->seed_time_second_decimal);
@@ -347,27 +422,42 @@ int main(int argc, char **argv)
                                           &state_frame->seed_calendar_tm,
                                           sizeof(state_frame->seed_calendar_tm));
                 (void)read_device_snapshot(pid, base, state_frame->seed_device_globals);
+                if (captured == 0u && getenv("ELF_TRACE_REQUIRE_INITIALIZED") != NULL &&
+                    !seed_snapshot_initialized(state_frame)) {
+                    /* 启动期未完成 dyn_init 的调用不能作为双路回放的种子。 */
+                    regs.rip = base + ELF_DYN_MAIN_OFFSET;
+                    if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) != 0 ||
+                        restore_word(pid, return_address, return_saved) != 0 ||
+                        patch_byte(pid, base + ELF_DYN_MAIN_OFFSET, &entry_saved) != 0) break;
+                    return_breakpoint = 0;
+                    entry_breakpoint = 1;
+                    continue;
+                }
                 __atomic_store_n(&state_frame->seed_ready,
                                  DP_C_SHADOW_SEED_READY, __ATOMIC_RELEASE);
                 print_seed_state(state_frame->state);
+                seed_published = 1;
             }
-            if (captured == 0u && rng_arm_path != NULL && rng_arm_path[0] != '\0') {
+            if (seed_published != 0 && captured == 0u &&
+                rng_arm_path != NULL && rng_arm_path[0] != '\0') {
                 FILE *arm = fopen(rng_arm_path, "w");
                 if (arm != NULL) fclose(arm);
             }
-            if (captured == 0u && clear_elf_ipc_payload(pid) != 0) {
+            if (seed_published != 0 && captured == 0u && clear_elf_ipc_payload(pid) != 0) {
                 fprintf(stderr, "无法清零 ELF 输出共享区\n");
                 break;
             }
             /* 入口断点停住后等待指定输入，保证 ELF 不会消费旧帧。 */
-            if (expected_input_sequence != 0u &&
+            if (warmup_pending == 0 && expected_input_sequence != 0u &&
                 wait_for_input_sequence(input_frame, expected_input_sequence) != 0) {
                 fprintf(stderr, "等待 ELF 输入序号 %u 超时，当前=%u\n",
                         expected_input_sequence, input_frame->sequence);
                 break;
             }
-            active_input_sequence = expected_input_sequence != 0u
+            active_input_sequence = warmup_pending != 0 ? 0u : expected_input_sequence != 0u
                 ? expected_input_sequence : input_frame->sequence;
+            if (read_process_bytes(pid, active_command_address, active_command,
+                                   sizeof(active_command)) != 0) break;
             regs.rip = base + ELF_DYN_MAIN_OFFSET;
             if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) != 0) break;
             entry_breakpoint = 0;
@@ -376,16 +466,18 @@ int main(int argc, char **argv)
         }
         if (ptrace(PTRACE_GETREGS, pid, NULL, &regs) != 0 ||
             restore_word(pid, return_address, return_saved) != 0) break;
-        for (unsigned attempts = 0u;
-             attempts < 30000u &&
-             __atomic_load_n(&state_frame->seed_ack, __ATOMIC_ACQUIRE) == 0u;
-             ++attempts) {
-            const struct timespec wait_time = {0, 1000000};
-            nanosleep(&wait_time, NULL);
-        }
-        if (__atomic_load_n(&state_frame->seed_ack, __ATOMIC_ACQUIRE) == 0u) {
-            fprintf(stderr, "等待纯C影子确认初始状态超时\n");
-            break;
+        if (seed_published != 0) {
+            for (unsigned attempts = 0u;
+                 attempts < 30000u &&
+                 __atomic_load_n(&state_frame->seed_ack, __ATOMIC_ACQUIRE) == 0u;
+                 ++attempts) {
+                const struct timespec wait_time = {0, 1000000};
+                nanosleep(&wait_time, NULL);
+            }
+            if (__atomic_load_n(&state_frame->seed_ack, __ATOMIC_ACQUIRE) == 0u) {
+                fprintf(stderr, "等待纯C影子确认初始状态超时\n");
+                break;
+            }
         }
         regs.rip = return_address;
         if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) != 0 ||
@@ -409,6 +501,8 @@ int main(int argc, char **argv)
         state_frame->ipc_bytes =
             read_elf_ipc_payload(pid, state_frame->ipc_payload) == 0
             ? DP_IPC_PAYLOAD_BYTES : 0u;
+        (void)read_process_double(pid, base + ELF_T_OFFSET,
+                                  &state_frame->integration_time);
         (void)read_process_double(pid, base + ELF_TIME_SECOND_DECIMAL_OFFSET,
                                   &state_frame->time_second_decimal);
         (void)read_process_double(pid, base + ELF_TIME_SECOND_TOTAL_OFFSET,
@@ -419,8 +513,41 @@ int main(int argc, char **argv)
         (void)read_process_bytes(pid, base + ELF_TIME_TM_OFFSET,
                                   &state_frame->calendar_tm,
                                   sizeof(state_frame->calendar_tm));
+        if (warmup_pending != 0) {
+            memcpy(state_frame->seed_device_globals, state_frame->device_globals,
+                   sizeof(state_frame->seed_device_globals));
+            memcpy(state_frame->seed_calendar, state_frame->calendar,
+                   sizeof(state_frame->seed_calendar));
+            state_frame->seed_calendar_tm = state_frame->calendar_tm;
+            state_frame->seed_integration_time = state_frame->integration_time;
+            state_frame->seed_time_second_decimal = state_frame->time_second_decimal;
+            state_frame->seed_time_second_total = state_frame->time_second_total;
+            if (getenv("ELF_TRACE_REQUIRE_INITIALIZED") != NULL &&
+                !seed_snapshot_initialized(state_frame)) {
+                fprintf(stderr, "预热后初态仍未完成初始化\n");
+                break;
+            }
+            __atomic_store_n(&state_frame->seed_ready,
+                             DP_C_SHADOW_SEED_READY, __ATOMIC_RELEASE);
+            seed_published = 1;
+            warmup_pending = 0;
+            if (rng_arm_path != NULL && rng_arm_path[0] != '\0') {
+                FILE *arm = fopen(rng_arm_path, "w");
+                if (arm != NULL) fclose(arm);
+            }
+            if (clear_elf_ipc_payload(pid) != 0) {
+                fprintf(stderr, "无法清零 ELF 输出共享区\n");
+                break;
+            }
+            return_breakpoint = 0;
+            entry_breakpoint = 1;
+            continue;
+        }
         state_frame->input_sequence = active_input_sequence;
         state_frame->reserved = rng_record_count(getenv("DP_RNG_RECORD_FILE"));
+        memcpy(&state_frame->applied_command, active_command,
+               sizeof(state_frame->applied_command));
+        write_command_trace(command_trace, active_input_sequence, active_command);
         __atomic_store_n(&state_frame->sequence, captured + 1u, __ATOMIC_RELEASE);
         if (state_log != NULL) {
             (void)fwrite(state_frame, sizeof(*state_frame), 1u, state_log);
@@ -444,6 +571,7 @@ int main(int argc, char **argv)
         (void)unlink(rng_arm_path);
     (void)ptrace(PTRACE_DETACH, pid, NULL, NULL);
     if (state_log != NULL) (void)fclose(state_log);
+    if (command_trace != NULL) (void)fclose(command_trace);
     if (state_frame != MAP_FAILED) (void)munmap(state_frame, sizeof(*state_frame));
     if (input_frame != MAP_FAILED) (void)munmap(input_frame, sizeof(*input_frame));
     printf("1. 结果=%s\n2. ELF dyn_main返回采样=%u\n3. 状态维度=%u\n4. 状态共享内存=%s\n5. 输入序号闸门=%s\n",

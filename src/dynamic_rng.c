@@ -6,6 +6,7 @@
 #include <time.h>
 
 static FILE *dp_rng_replay_file;
+static FILE *dp_rng_stage_file;
 static int dp_rng_error;
 static uint64_t dp_rng_count_value;
 
@@ -25,6 +26,10 @@ void dp_rng_close(void)
         (void)fclose(dp_rng_replay_file);
         dp_rng_replay_file = NULL;
     }
+    if (dp_rng_stage_file != NULL) {
+        (void)fclose(dp_rng_stage_file);
+        dp_rng_stage_file = NULL;
+    }
 }
 
 int dp_rng_had_error(void)
@@ -35,6 +40,22 @@ int dp_rng_had_error(void)
 uint64_t dp_rng_count(void)
 {
     return dp_rng_count_value;
+}
+
+void dp_rng_trace_stage(const char *stage)
+{
+    const char *path;
+
+    if (stage == NULL) return;
+    if (dp_rng_stage_file == NULL) {
+        path = getenv("C_SHADOW_RNG_STAGE_TRACE");
+        if (path == NULL || path[0] == '\0') return;
+        dp_rng_stage_file = fopen(path, "w");
+        if (dp_rng_stage_file == NULL) return;
+    }
+    (void)fprintf(dp_rng_stage_file, "%llu %s\n",
+                  (unsigned long long)dp_rng_count_value, stage);
+    (void)fflush(dp_rng_stage_file);
 }
 
 int dp_rng_next(int32_t *value)

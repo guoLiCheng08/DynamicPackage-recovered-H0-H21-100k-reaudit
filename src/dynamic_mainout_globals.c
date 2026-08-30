@@ -1,5 +1,6 @@
 #include "dynamic_devices.h"
 #include "dynamic_orbit.h"
+#include "dynamic_rng.h"
 #include "dynamic_satellite_globals.h"
 #include "dynamic_telemetry_layout.h"
 #include "dynamic_time.h"
@@ -31,9 +32,11 @@ void UpdateMainOut(void *out, const void *core_dynamic_output)
     /* 汇编以输出 +0x138/+0x150 的 GPS_Kalman 状态作为坐标转换和根数反算输入。 */
     memcpy(position_data, source.gps_value, sizeof(position_data));
     memcpy(velocity_data, source.gps_value + 3u, sizeof(velocity_data));
+    dp_rng_trace_stage("wheel_speed.begin");
     for (index = 0u; index < DP_WHEEL_COUNT; ++index) {
         source.rw_omega[index] = dp_get_wheel_speed(RWheel, index);
     }
+    dp_rng_trace_stage("wheel_speed.end");
     source.sada_raw[0] = SADA.current_angle[0];
     source.sada_raw[1] = SADA.current_angle[1];
     source.sada_raw[2] = SADA.angular_velocity[0];

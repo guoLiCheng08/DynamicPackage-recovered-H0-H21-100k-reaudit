@@ -67,7 +67,8 @@ static void canonicalize_device_snapshot(uint8_t snapshot[DP_DEVICE_GLOBAL_SNAPS
 }
 
 static int device_snapshot_equal(const uint8_t c_snapshot[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES],
-                                 const uint8_t elf_snapshot[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES])
+                                 const uint8_t elf_snapshot[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES],
+                                 unsigned *first_offset, uint8_t *c_value, uint8_t *elf_value)
 {
     uint8_t c_canonical[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES];
     uint8_t elf_canonical[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES];
@@ -76,7 +77,15 @@ static int device_snapshot_equal(const uint8_t c_snapshot[DP_DEVICE_GLOBAL_SNAPS
     memcpy(elf_canonical, elf_snapshot, sizeof(elf_canonical));
     canonicalize_device_snapshot(c_canonical);
     canonicalize_device_snapshot(elf_canonical);
-    return memcmp(c_canonical, elf_canonical, sizeof(c_canonical)) == 0;
+    for (unsigned index = 0u; index < sizeof(c_canonical); ++index) {
+        if (c_canonical[index] != elf_canonical[index]) {
+            *first_offset = index;
+            *c_value = c_canonical[index];
+            *elf_value = elf_canonical[index];
+            return 0;
+        }
+    }
+    return 1;
 }
 
 static int compare_frame(const DpCShadowStateFrame *c_frame,
@@ -87,6 +96,9 @@ static int compare_frame(const DpCShadowStateFrame *c_frame,
     unsigned state_mismatches = 0u;
     int telemetry_mismatch = 0;
     int device_mismatch = 0;
+    unsigned device_offset = 0u;
+    uint8_t c_device_value = 0u;
+    uint8_t elf_device_value = 0u;
 
     if (c_frame->input_sequence != elf_frame->input_sequence) {
         printf("行=%u 序号不一致 C=%u ELF=%u\n", row,
@@ -100,6 +112,8 @@ static int compare_frame(const DpCShadowStateFrame *c_frame,
                 printf("首个状态分叉：行=%u 序号=%u 状态[%u] C=%.17g ELF=%.17g\n",
                        row, c_frame->input_sequence, index,
                        c_frame->state[index], elf_frame->state[index]);
+                printf("积分时间：C=%.17g ELF=%.17g\n",
+                       c_frame->integration_time, elf_frame->integration_time);
             }
             ++state_mismatches;
         }
@@ -112,12 +126,18 @@ static int compare_frame(const DpCShadowStateFrame *c_frame,
     if (c_frame->devices_bytes == DP_DEVICE_GLOBAL_SNAPSHOT_BYTES &&
         elf_frame->devices_bytes == DP_DEVICE_GLOBAL_SNAPSHOT_BYTES) {
         device_mismatch = !device_snapshot_equal(c_frame->device_globals,
-                                                 elf_frame->device_globals);
+                                                 elf_frame->device_globals,
+                                                 &device_offset, &c_device_value,
+                                                 &elf_device_value);
     }
     if (state_mismatches != 0u || telemetry_mismatch || device_mismatch) {
         printf("行=%u 序号=%u 结果=失败 状态差异=%u/%u 遥测差异=%s 设备差异=%s\n",
                row, c_frame->input_sequence, state_mismatches, DP_STATE_DIM,
                telemetry_mismatch ? "是" : "否", device_mismatch ? "是" : "否");
+        if (device_mismatch) {
+            printf("首个设备快照分叉：偏移=0x%04x C=0x%02x ELF=0x%02x\n",
+                   device_offset, c_device_value, elf_device_value);
+        }
         return 1;
     }
     return 0;

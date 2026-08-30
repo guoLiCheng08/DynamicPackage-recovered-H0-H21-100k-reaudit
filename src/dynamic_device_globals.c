@@ -1,5 +1,6 @@
 #include "dynamic_devices.h"
 #include "dynamic_flex.h"
+#include "dynamic_rng.h"
 #include "dynamic_satellite_globals.h"
 
 #include <stdio.h>
@@ -82,7 +83,9 @@ void UpdateDeviceControl(const void *command, double scale)
 
     /* 原调用顺序：惯量更新、飞轮、MTQ、推进器、SADA。 */
     dp_global_inertia_update(device_command->inertia_update_flag);
+    dp_rng_trace_stage("wheel_acc.begin");
     dp_set_wheel_acc(RWheel, device_command->wheel_torque_command, NULL, NULL);
+    dp_rng_trace_stage("wheel_acc.end");
     (void)dp_update_wheel_group(RWheel, step_time, &WheelGroup.angular_momentum,
                                 &WheelGroup.torque, &WheelGroup.mapping_3x4);
     dp_set_mtq_moment(MTQ, device_command->mtq_moment_command);

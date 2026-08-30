@@ -36,7 +36,13 @@ int main(int argc, char **argv)
     double max_state_error = 0.0;
     unsigned max_state_row = 0u;
     unsigned max_state_index = 0u;
+    double max_state_error_by_index[DP_STATE_DIM] = {0.0};
+    double max_state_c_value[DP_STATE_DIM] = {0.0};
+    double max_state_elf_value[DP_STATE_DIM] = {0.0};
+    unsigned max_state_row_by_index[DP_STATE_DIM] = {0u};
     unsigned first_rng_mismatch_row = 0u;
+    uint32_t first_rng_c_count = 0u;
+    uint32_t first_rng_elf_count = 0u;
 
     if (argc != 3) {
         fprintf(stderr, "用法: %s C状态日志 ELF状态日志\n", argv[0]);
@@ -50,14 +56,23 @@ int main(int argc, char **argv)
         unsigned index;
         ++row;
         if (c_frame.input_sequence != elf_frame.input_sequence) ++sequence_mismatch;
-        if (c_frame.reserved != elf_frame.reserved && first_rng_mismatch_row == 0u)
+        if (c_frame.reserved != elf_frame.reserved && first_rng_mismatch_row == 0u) {
             first_rng_mismatch_row = row;
+            first_rng_c_count = c_frame.reserved;
+            first_rng_elf_count = elf_frame.reserved;
+        }
         for (index = 0u; index < DP_STATE_DIM; ++index) {
             double error = fabs(c_frame.state[index] - elf_frame.state[index]);
             if (error > max_state_error) {
                 max_state_error = error;
                 max_state_row = row;
                 max_state_index = index;
+            }
+            if (error > max_state_error_by_index[index]) {
+                max_state_error_by_index[index] = error;
+                max_state_c_value[index] = c_frame.state[index];
+                max_state_elf_value[index] = elf_frame.state[index];
+                max_state_row_by_index[index] = row;
             }
             if (memcmp(&c_frame.state[index], &elf_frame.state[index], sizeof(double)) != 0)
                 ++state_mismatch;
@@ -77,7 +92,16 @@ int main(int argc, char **argv)
            "4. 状态逐字节差异=%u\n5. 状态最大绝对误差=%.17g（行=%u，状态[%u]）\n",
            row, sequence_mismatch, state_mismatch, max_state_error,
            max_state_row, max_state_index);
-    printf("6. 随机数计数首个差异行=%u\n", first_rng_mismatch_row);
+    printf("6. 随机数计数首个差异行=%u（C=%u，ELF=%u）\n", first_rng_mismatch_row,
+           first_rng_c_count, first_rng_elf_count);
+    for (unsigned index = 0u; index < DP_STATE_DIM; ++index) {
+        if (max_state_error_by_index[index] != 0.0) {
+            printf("7.%u. 状态[%u] 最大绝对误差=%.17g（行=%u，C=%.17g，ELF=%.17g）\n",
+                   index + 1u, index, max_state_error_by_index[index],
+                   max_state_row_by_index[index], max_state_c_value[index],
+                   max_state_elf_value[index]);
+        }
+    }
     for (unsigned index = 0u; index < sizeof(telemetry_regions) / sizeof(telemetry_regions[0]); ++index)
         printf("6.%u. 主遥测字段=%s，差异字节=%u\n", index + 1u,
                telemetry_regions[index].name, telemetry_diff[index]);

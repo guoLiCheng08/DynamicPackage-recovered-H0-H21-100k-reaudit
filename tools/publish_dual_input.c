@@ -19,7 +19,8 @@ static int parse_double(const char *text, double *value)
     return end != text && *end == '\0';
 }
 
-static int publish_elf_input(const char *elf_input_path, const float values[16])
+static int publish_elf_input(const char *elf_input_path, const float values[12],
+                             const uint8_t flags[3])
 {
     int fd = open(elf_input_path, O_RDWR | O_CLOEXEC);
     DpIpcMappedShared *mapped;
@@ -33,10 +34,11 @@ static int publish_elf_input(const char *elf_input_path, const float values[16])
         (void)munmap(mapped, sizeof(*mapped));
         return -1;
     }
-    for (index = 0u; index < 16u; ++index) {
+    for (index = 0u; index < 12u; ++index) {
         memcpy((unsigned char *)mapped + DP_IPC_FLOAT_BASE + index * sizeof(float),
                &values[index], sizeof(values[index]));
     }
+    memcpy((unsigned char *)mapped + DP_IPC_U8_BASE, flags, 3u);
     (void)pthread_rwlock_unlock(&mapped->lock);
     (void)munmap(mapped, sizeof(*mapped));
     return 0;
@@ -45,7 +47,8 @@ static int publish_elf_input(const char *elf_input_path, const float values[16])
 int main(int argc, char **argv)
 {
     DpShadowReplayFrame *replay;
-    float elf_values[16] = {0.0f};
+    float elf_values[12] = {0.0f};
+    uint8_t elf_flags[3];
     double values[15];
     int replay_fd;
     unsigned index;
@@ -64,16 +67,17 @@ int main(int argc, char **argv)
     }
     for (index = 0u; index < 4u; ++index) elf_values[index] = (float)values[index];
     for (index = 0u; index < 6u; ++index) elf_values[index + 4u] = (float)values[index + 4u];
-    elf_values[10] = (float)values[10];
-    elf_values[11] = (float)values[11];
-    elf_values[12] = (float)values[12];
-    elf_values[14] = (float)values[13];
-    elf_values[15] = (float)values[14];
+    elf_values[10] = (float)values[11];
+    elf_values[11] = (float)values[12];
+    elf_flags[0] = values[0] != 0.0 || values[1] != 0.0 ||
+                   values[2] != 0.0 || values[3] != 0.0;
+    elf_flags[1] = (uint8_t)values[10];
+    elf_flags[2] = values[13] != 0.0;
     {
         const char *elf_input_path = getenv("ELF_INPUT_FD");
         if (elf_input_path == NULL || elf_input_path[0] == '\0')
             elf_input_path = DP_IPC_SHM_NAME;
-        if (publish_elf_input(elf_input_path, elf_values) != 0) {
+        if (publish_elf_input(elf_input_path, elf_values, elf_flags) != 0) {
             fprintf(stderr, "无法写入正式 ELF 输入共享区 %s: %s\n",
                     elf_input_path, strerror(errno));
             return 1;
@@ -95,11 +99,11 @@ int main(int argc, char **argv)
     memset(&replay->command, 0, sizeof(replay->command));
     for (index = 0u; index < 4u; ++index) replay->command.wheel_torque_command[index] = values[index];
     for (index = 0u; index < 6u; ++index) replay->command.mtq_moment_command[index] = values[index + 4u];
-    replay->command.sada_command_flag = (uint32_t)values[10];
-    replay->command.sada_command_angle[0] = values[11];
-    replay->command.sada_command_angle[1] = values[12];
-    replay->command.thruster_work_status = (uint32_t)values[13];
-    replay->command.inertia_update_flag = (uint32_t)values[14];
+    replay->command.sada_command_flag = elf_flags[1];
+    replay->command.sada_command_angle[0] = (double)elf_values[10];
+    replay->command.sada_command_angle[1] = (double)elf_values[11];
+    replay->command.thruster_work_status = elf_flags[2];
+    replay->command.inertia_update_flag = 0u;
     (void)msync(replay, sizeof(*replay), MS_SYNC);
     __atomic_store_n(&replay->sequence, sequence, __ATOMIC_RELEASE);
     (void)msync((unsigned char *)replay + offsetof(DpShadowReplayFrame, sequence),

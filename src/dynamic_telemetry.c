@@ -1,5 +1,6 @@
 /* UpdateMainOut 确定性封包部分的高保真恢复。 */
 #include "dynamic_telemetry_layout.h"
+#include "dynamic_rng.h"
 
 #include <string.h>
 
@@ -82,6 +83,7 @@ int dp_telemetry_source_from_devices(DpTelemetrySourceSnapshot *source,
         return -1;
     }
     memset(source, 0, sizeof(*source));
+    dp_rng_trace_stage("star_tracker.begin");
     for (index = 0u; index < 3u; ++index) {
         if (dp_get_star_tracker_quat(source->sts_quat[index], &devices->sts[index],
                                      NULL, NULL) != 0) {
@@ -89,6 +91,7 @@ int dp_telemetry_source_from_devices(DpTelemetrySourceSnapshot *source,
         }
         source->sts_valid[index] = devices->sts[index].valid_flag;
     }
+    dp_rng_trace_stage("star_tracker.end");
     for (index = 0u; index < 2u; ++index) {
         if (devices->gyro[index].measure.data == NULL ||
             devices->magmeter[index].measure.data == NULL) {

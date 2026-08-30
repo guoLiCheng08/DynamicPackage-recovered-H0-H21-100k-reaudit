@@ -1,9 +1,14 @@
 /* DynamicPackage Gyro / MagMeter 恢复实现。 */
+#define _GNU_SOURCE
 #include "dynamic_sensors.h"
 #include "dynamic_rng.h"
 
+#include <dlfcn.h>
+#include <fcntl.h>
 #include <math.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
 
 /* 原 ELF 全局 STS：3 个连续 0x170 字节对象。 */
 DpStsRecovered STS[3];
@@ -17,6 +22,29 @@ int temp;
 /* 原 ELF 全局 GPS 对象与初始化标志。 */
 DpGpsKalmanRecovered GPS_Kalman;
 int init_flag;
+
+static void dp_trace_gaussian_caller(void *caller)
+{
+    static int trace_fd = -2;
+    const char *path;
+    Dl_info caller_info;
+    uintptr_t offset = (uintptr_t)caller;
+    char line[64];
+    int length;
+
+    if (trace_fd == -2) {
+        path = getenv("C_SHADOW_GAUSSIAN_TRACE");
+        trace_fd = path != NULL && path[0] != '\0'
+            ? open(path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0600) : -1;
+    }
+    if (trace_fd < 0) return;
+    if (dladdr(caller, &caller_info) != 0 && caller_info.dli_fbase != NULL)
+        offset -= (uintptr_t)caller_info.dli_fbase;
+    length = snprintf(line, sizeof(line), "%llu 0x%lx\n",
+                      (unsigned long long)dp_rng_count(), (unsigned long)offset);
+    if (length > 0 && (size_t)length < sizeof(line))
+        (void)write(trace_fd, line, (size_t)length);
+}
 
 /* 原 Gyro_Init：每个 0x320 对象均将配置源、转置输出与测量向量
  * 指向固定对象内 backing，随后执行 matrix_trans(output, source)。 */
@@ -97,6 +125,8 @@ double dp_ran_gaussian_recovered(double sigma)
     double y;
     double radius_squared;
     int32_t random_value;
+
+    dp_trace_gaussian_caller(__builtin_return_address(0));
 
     do {
         do {
@@ -606,10 +636,16 @@ void dp_update_device_measure_recovered(DpDeviceMeasureRecovered *devices,
 
     dp_update_sts_quat(devices->sts, &truth_quat, step_time);
     dp_update_sts_valid_flag(devices->sts, &truth_quat, &position_gci, &sun_gci);
+    dp_rng_trace_stage("gyro.begin");
     dp_update_gyro(devices->gyro, &state->body_rate, gaussian2, opaque);
+    dp_rng_trace_stage("gyro.end");
+    dp_rng_trace_stage("dss.begin");
     dp_update_dss(devices->dss, &environment->sun_body, gaussian2, opaque);
+    dp_rng_trace_stage("dss.end");
     dp_update_dss_valid_flag(devices->dss, &sun_gci, &position_gci);
+    dp_rng_trace_stage("magmeter.begin");
     dp_update_magmeter(devices->magmeter, &environment->magnetic_body, gaussian2, opaque);
+    dp_rng_trace_stage("magmeter.end");
     dp_update_gps(&devices->gps, environment->time_values, &state->position_gci,
                   &state->velocity_gci, &devices->gps_init_flag);
 }
