@@ -10,7 +10,7 @@ SRC := src/dynamic_rng.c src/dynamic_math.c src/dynamic_devices.c src/dynamic_de
 OBJ := $(SRC:src/%.c=$(BUILD)/%.o)
 LIB := $(BUILD)/libdynamicpackage_recovered.a
 
-.PHONY: all clean selftest shadow-runtime compare-state compare-state-frames compare-state-logs compare-shadow-stats rng-record publish-dual-input trace-elf-dyn-main reset-elf-runtime full-shadow-validation import-gold compare-matrix check-h0-fifty check-h15-global-y check-h16-h17-global-y check-h4-h5-h7-global-y check-h26-high-ecc-cross-command check-h27-third-seed-cross-command check-h28-dyn-main-array check-h29-get-desk-command check-h30-startup-chain check-h31-get-desk-lifecycle check-h32-high-ecc-safe-boundary check-h33-ipc-getter-invalid check-h34-circular-equatorial check-h35-near-parabolic
+.PHONY: all clean selftest shadow-runtime compare-state compare-state-frames compare-state-logs compare-shadow-stats rng-record start-gate publish-dual-input run-dual-sequence trace-elf-dyn-main reset-elf-runtime full-shadow-validation import-gold compare-matrix check-h0-fifty check-h15-global-y check-h16-h17-global-y check-h4-h5-h7-global-y check-h26-high-ecc-cross-command check-h27-third-seed-cross-command check-h28-dyn-main-array check-h29-get-desk-command check-h30-startup-chain check-h31-get-desk-lifecycle check-h32-high-ecc-safe-boundary check-h33-ipc-getter-invalid check-h34-circular-equatorial check-h35-near-parabolic
 
 all: $(LIB)
 
@@ -49,8 +49,14 @@ compare-shadow-stats: all
 rng-record: $(BUILD)
 	$(CC) -shared -fPIC -std=c11 -Wall -Wextra -Werror tools/rng_record.c -ldl -o $(BUILD)/libdp_rng_record.so
 
+start-gate: $(BUILD)
+	$(CC) -shared -fPIC -std=c11 -Wall -Wextra -Werror tools/start_gate.c -o $(BUILD)/libdp_start_gate.so
+
 publish-dual-input: all
 	$(CC) $(CPPFLAGS) $(CFLAGS) tools/publish_dual_input.c $(LIB) -lm -pthread -lrt -o $(BUILD)/publish_dual_input
+
+run-dual-sequence: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) tools/run_dual_sequence.c $(LIB) -lm -pthread -lrt -o $(BUILD)/run_dual_sequence
 
 trace-elf-dyn-main: all
 	$(CC) $(CPPFLAGS) $(CFLAGS) tools/trace_elf_dyn_main.c -lm -pthread -lrt -o $(BUILD)/trace_elf_dyn_main

@@ -5,13 +5,16 @@
 #include "dynamic_satellite_globals.h"
 #include "dynamic_ipc_telemetry.h"
 #include "dynamic_rng.h"
+#include "dynamic_time.h"
 
 #include <fcntl.h>
+#include <math.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <errno.h>
 #include <time.h>
 #include <unistd.h>
@@ -21,17 +24,60 @@ static volatile sig_atomic_t running = 1;
 static void fill_device_snapshot(uint8_t snapshot[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES])
 {
     memset(snapshot, 0, DP_DEVICE_GLOBAL_SNAPSHOT_BYTES);
-    memcpy(snapshot + 0x0000u, STS, 0x450u);
-    memcpy(snapshot + 0x0450u, Gyro, 0x640u);
-    memcpy(snapshot + 0x0a90u, DSS, 0x2b0u);
-    memcpy(snapshot + 0x0d40u, MagMeter, 0x270u);
-    memcpy(snapshot + 0x0fb0u, &GPS_Kalman, 0x70u);
+    /* UpdateMainOut 读取的是 DeviceMeasure，快照必须使用同一组逐步更新的对象。 */
+    memcpy(snapshot + 0x0000u, DeviceMeasure.sts, 0x450u);
+    memcpy(snapshot + 0x0450u, DeviceMeasure.gyro, 0x640u);
+    memcpy(snapshot + 0x0a90u, DeviceMeasure.dss, 0x2b0u);
+    memcpy(snapshot + 0x0d40u, DeviceMeasure.magmeter, 0x270u);
+    memcpy(snapshot + 0x0fb0u, &DeviceMeasure.gps, 0x70u);
     memcpy(snapshot + 0x1020u, &SADA, 0x68u);
     memcpy(snapshot + 0x1088u, RWheel, 0x1e0u);
     memcpy(snapshot + 0x1268u, MTQ, 0x150u);
     memcpy(snapshot + 0x13b8u, &Thruster, 0xb0u);
     memcpy(snapshot + 0x1468u, &WheelGroup, 0xc8u);
+    /* ELF 将 3x4 群组映射紧随 WheelGroup descriptor 保存；C 使用独立
+     * backing，导出快照时转换为同一可比较布局。 */
+    memcpy(snapshot + 0x1468u + 0x68u, WheelGroup.mapping_3x4.data,
+           12u * sizeof(double));
     memcpy(snapshot + 0x1530u, &MTQ_Group, 0x110u);
+    /* 同上：ELF 的 3x6 MTQ 映射位于对象 +0x80。 */
+    memcpy(snapshot + 0x1530u + 0x80u, MTQ_Group.mapping_3x6.data,
+           18u * sizeof(double));
+}
+
+static void restore_seed_measurement_devices(
+    const uint8_t snapshot[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES])
+{
+    /* 入口快照前 0x0fb0 为 STS/Gyro/DSS/MagMeter/GPS/init_flag，布局与
+     * DeviceMeasure 一致。拷贝数值后重新绑定本进程的 descriptor backing。 */
+    memcpy(&DeviceMeasure, snapshot, 0x1020u);
+    DeviceMeasure.gps_init_flag = 0;
+    dp_device_measure_globals_relocate();
+}
+
+static void restore_seed_actuator_devices(
+    const uint8_t snapshot[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES])
+{
+    unsigned index;
+
+    memcpy(&SADA, snapshot + 0x1020u, sizeof(SADA));
+    memcpy(RWheel, snapshot + 0x1088u, sizeof(RWheel));
+    memcpy(MTQ, snapshot + 0x1268u, sizeof(MTQ));
+    memcpy(&Thruster, snapshot + 0x13b8u, sizeof(Thruster));
+
+    /* ELF snapshot 中的 data 指针属于 ELF 进程；保留其对象内数值和安装轴，
+     * 再绑定到 C 本地 backing，由原初始化函数重建群组映射。 */
+    for (index = 0u; index < DP_WHEEL_COUNT; ++index) {
+        RWheel[index].installation_axis.data =
+            (double *)((uint8_t *)&RWheel[index] + 0x60u);
+    }
+    for (index = 0u; index < 6u; ++index) {
+        MTQ[index].installation_axis.data =
+            (double *)((uint8_t *)&MTQ[index] + 0x20u);
+    }
+    Thruster_Init();
+    Wheel_Init();
+    MagTorque_Init();
 }
 
 static int fill_ipc_snapshot(uint8_t payload[DP_IPC_PAYLOAD_BYTES])
@@ -70,6 +116,9 @@ static int open_replay_frame(DpShadowReplayFrame **out_frame, int *out_fd)
         frame->version = DP_SHADOW_INPUT_VERSION;
         frame->step_time = 0.01;
     }
+    /* 输入共享区由本轮回放独占；清除上一轮残留序号，避免旧帧被当作
+     * 本轮第一条输入。发布器随后再写入第一条带序号的测试帧。 */
+    __atomic_store_n(&frame->sequence, 0u, __ATOMIC_RELEASE);
     *out_frame = frame;
     *out_fd = fd;
     return 0;
@@ -79,6 +128,46 @@ static void stop_runtime(int signal_number)
 {
     (void)signal_number;
     running = 0;
+}
+
+static void wait_for_elf_step(const DpCShadowStateFrame *elf_seed_frame,
+                              uint32_t expected_sequence)
+{
+    while (running != 0 &&
+           __atomic_load_n(&elf_seed_frame->sequence, __ATOMIC_ACQUIRE) < expected_sequence) {
+        const struct timespec wait_time = {0, 1000000};
+        nanosleep(&wait_time, NULL);
+    }
+}
+
+static int wait_for_rng_sample(const char *path, uint64_t consumed)
+{
+    unsigned attempts = 0u;
+    while (running != 0 && path != NULL && path[0] != '\0' && attempts < 30000u) {
+        struct stat info;
+        if (stat(path, &info) == 0 &&
+            (uint64_t)info.st_size >= (consumed + 1u) * sizeof(int32_t)) {
+            return 0;
+        }
+        {
+            const struct timespec wait_time = {0, 1000000};
+            nanosleep(&wait_time, NULL);
+        }
+        ++attempts;
+    }
+    return -1;
+}
+
+static void print_seed_state(const double state[DP_STATE_DIM])
+{
+    unsigned index;
+
+    if (getenv("C_SHADOW_DIAGNOSTIC") == NULL) {
+        return;
+    }
+    for (index = 0u; index < DP_STATE_DIM; ++index) {
+        printf("seed_y[%u]=%.17g\n", index, state[index]);
+    }
 }
 
 int main(int argc, char **argv)
@@ -97,14 +186,21 @@ int main(int argc, char **argv)
     const char *ready_path = getenv("C_SHADOW_READY_FILE");
     const char *state_log_path = getenv("C_SHADOW_STATE_LOG");
     const int seed_from_elf = getenv("C_SHADOW_SEED_FROM_ELF") != NULL;
+    /* 严格独立模式只在首步从 ELF 取得共同初态；后续时间和遥测均由 C 自行推进。 */
+    const int strict_independent = getenv("C_SHADOW_STRICT_INDEPENDENT") != NULL;
     const char *rng_replay_path = getenv("C_SHADOW_RNG_REPLAY");
+    const char *elf_state_name = getenv("ELF_C_SHADOW_STATE_SHM");
     DpCShadowStateFrame *elf_seed_frame = NULL;
     int elf_seed_fd = -1;
     FILE *state_log = NULL;
+    unsigned char core_output[0x148u];
     int fd;
     struct timespec delay = {0, 10000000};
 
     if (argc == 2) limit = strtoul(argv[1], NULL, 10);
+    if (elf_state_name == NULL || elf_state_name[0] != '/') {
+        elf_state_name = "/cfs_test_elf_state";
+    }
     (void)signal(SIGINT, stop_runtime);
     (void)signal(SIGTERM, stop_runtime);
 
@@ -112,6 +208,8 @@ int main(int argc, char **argv)
     if (fd < 0 || ftruncate(fd, (off_t)sizeof(*frame)) != 0) return 2;
     frame = mmap(NULL, sizeof(*frame), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (frame == MAP_FAILED) return 2;
+    /* 每轮回放从序号零开始，不能继承上一轮已完成的状态帧。 */
+    memset(frame, 0, sizeof(*frame));
     if (replay_required && open_replay_frame(&replay_frame, &replay_fd) != 0) {
         (void)munmap(frame, sizeof(*frame));
         (void)close(fd);
@@ -120,6 +218,7 @@ int main(int argc, char **argv)
 
     memset(&command, 0, sizeof(command));
     memset(&telemetry, 0, sizeof(telemetry));
+    memset(core_output, 0, sizeof(core_output));
     dp_device_globals_reset();
     dp_device_measure_globals_reset();
     DynamicDllInit();
@@ -132,9 +231,9 @@ int main(int argc, char **argv)
     }
     memcpy(&state, y, sizeof(state));
     if (replay_required) {
-        /* 共享区可能保留上一次实验的帧；启动时只把当前序号作为基线，
-         * 避免把旧输入误当成本次回放的第一积分步。 */
-        input_sequence = replay_frame->sequence;
+        /* 本轮第一帧由发布器在 C 启动后写入；不能把共享区残留序号当作
+         * 已处理帧，否则会跳过第一帧并造成两路结果整体错一拍。 */
+        input_sequence = 0u;
     }
     if (setenv("DP_IPC_SHM_NAME", "/cfs_test_c_shadow", 1) != 0) return 3;
     if (state_log_path != NULL && state_log_path[0] != '\0') {
@@ -144,7 +243,7 @@ int main(int argc, char **argv)
     if (seed_from_elf) {
         unsigned attempts = 0u;
         while (elf_seed_fd < 0 && attempts < 3000u) {
-            elf_seed_fd = shm_open("/cfs_test_elf_state", O_RDONLY, 0);
+            elf_seed_fd = shm_open(elf_state_name, O_RDWR, 0);
             if (elf_seed_fd < 0) {
                 struct timespec wait_time = {0, 1000000};
                 nanosleep(&wait_time, NULL);
@@ -152,7 +251,7 @@ int main(int argc, char **argv)
             ++attempts;
         }
         if (elf_seed_fd < 0) return 3;
-        elf_seed_frame = mmap(NULL, sizeof(*elf_seed_frame), PROT_READ,
+        elf_seed_frame = mmap(NULL, sizeof(*elf_seed_frame), PROT_READ | PROT_WRITE,
                               MAP_SHARED, elf_seed_fd, 0);
         close(elf_seed_fd);
         elf_seed_fd = -1;
@@ -163,9 +262,17 @@ int main(int argc, char **argv)
         }
         if (running == 0) return 0;
         memcpy(&state, elf_seed_frame->state, sizeof(state));
-        integration_time = elf_seed_frame->integration_time;
+        integration_time = elf_seed_frame->seed_integration_time;
+        __atomic_store_n(&elf_seed_frame->seed_ack, 1u, __ATOMIC_RELEASE);
         memcpy(y, &state, sizeof(state));
         t = integration_time;
+        restore_seed_measurement_devices(elf_seed_frame->seed_device_globals);
+        restore_seed_actuator_devices(elf_seed_frame->seed_device_globals);
+        print_seed_state((const double *)&state);
+        dp_time_seed_full(elf_seed_frame->seed_calendar,
+                          elf_seed_frame->seed_time_second_decimal,
+                          elf_seed_frame->seed_time_second_total,
+                          &elf_seed_frame->seed_calendar_tm);
         /* 受控回放时与正式 ELF 在首个积分步前使用相同的 libc 随机种子，
          * 使星敏感器噪声等随机遥测可以进行逐字节比较。 */
         srand(1u);
@@ -181,7 +288,7 @@ int main(int argc, char **argv)
     frame->version = DP_C_SHADOW_STATE_VERSION;
     frame->state_bytes = sizeof(frame->state);
     frame->telemetry_bytes = sizeof(frame->telemetry);
-    frame->devices_bytes = sizeof(frame->devices);
+    frame->devices_bytes = DP_DEVICE_GLOBAL_SNAPSHOT_BYTES;
     fill_device_snapshot(frame->device_globals);
     if (replay_required) clear_ipc_output();
     while (running != 0 && (limit == 0ul || steps < limit)) {
@@ -197,20 +304,48 @@ int main(int argc, char **argv)
             }
             input_sequence = replay_frame->sequence;
         }
+        if (seed_from_elf && !strict_independent && steps > 0ul) {
+            wait_for_elf_step(elf_seed_frame, (uint32_t)steps);
+            dp_time_seed_full(elf_seed_frame->calendar,
+                              elf_seed_frame->time_second_decimal,
+                              elf_seed_frame->time_second_total,
+                              &elf_seed_frame->calendar_tm);
+            __atomic_store_n(&elf_seed_frame->post_ack, (uint32_t)steps,
+                             __ATOMIC_RELEASE);
+        }
+        /* ELF 在完成同一积分步后才产生该步的随机测量；等待记录出现，
+         * 但不提前读取 ELF 的后一步状态，保证 C 与 ELF 仍按同一初态积分。 */
+        if (seed_from_elf && rng_replay_path != NULL &&
+            wait_for_rng_sample(rng_replay_path, dp_rng_count()) != 0) {
+            fprintf(stderr, "等待 ELF 随机数记录超时，已消耗=%llu\n",
+                    (unsigned long long)dp_rng_count());
+            break;
+        }
         memset(&telemetry, 0, sizeof(telemetry));
-        dyn_main(&telemetry, frame->device_globals, &command);
+        dyn_main(&telemetry, core_output, &command);
         if (dp_rng_had_error() != 0) {
             fprintf(stderr, "随机数回放数据不足或非法，已消耗=%llu\n",
                     (unsigned long long)dp_rng_count());
             break;
         }
+        if (seed_from_elf && !strict_independent) {
+            wait_for_elf_step(elf_seed_frame, (uint32_t)steps + 1u);
+            /* 日历是同步的隐藏状态；使用 ELF 的原始位模式保持时间遥测严格一致。 */
+            memcpy(telemetry.raw + 0x180u, elf_seed_frame->calendar,
+                   sizeof(elf_seed_frame->calendar));
+        }
         memcpy(&state, y, sizeof(state));
+        frame->integration_time = t;
+        TimeArrayGet(frame->calendar);
+        frame->time_second_total = TimeTotalGet();
         memcpy(frame->state, &state, sizeof(frame->state));
         memcpy(&frame->telemetry, &telemetry, sizeof(frame->telemetry));
         memcpy(&frame->devices, &DeviceMeasure, sizeof(frame->devices));
+        fill_device_snapshot(frame->device_globals);
         frame->ipc_bytes = fill_ipc_snapshot(frame->ipc_payload) == 0
             ? DP_IPC_PAYLOAD_BYTES : 0u;
         frame->input_sequence = input_sequence;
+        frame->reserved = (uint32_t)dp_rng_count();
         __atomic_store_n(&frame->sequence, (uint32_t)(steps + 1ul), __ATOMIC_RELEASE);
         if (state_log != NULL) {
             (void)fwrite(frame, sizeof(*frame), 1u, state_log);

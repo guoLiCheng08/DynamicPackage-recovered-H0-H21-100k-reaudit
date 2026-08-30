@@ -36,6 +36,7 @@ int main(int argc, char **argv)
     double max_state_error = 0.0;
     unsigned max_state_row = 0u;
     unsigned max_state_index = 0u;
+    unsigned first_rng_mismatch_row = 0u;
 
     if (argc != 3) {
         fprintf(stderr, "用法: %s C状态日志 ELF状态日志\n", argv[0]);
@@ -49,6 +50,8 @@ int main(int argc, char **argv)
         unsigned index;
         ++row;
         if (c_frame.input_sequence != elf_frame.input_sequence) ++sequence_mismatch;
+        if (c_frame.reserved != elf_frame.reserved && first_rng_mismatch_row == 0u)
+            first_rng_mismatch_row = row;
         for (index = 0u; index < DP_STATE_DIM; ++index) {
             double error = fabs(c_frame.state[index] - elf_frame.state[index]);
             if (error > max_state_error) {
@@ -74,6 +77,7 @@ int main(int argc, char **argv)
            "4. 状态逐字节差异=%u\n5. 状态最大绝对误差=%.17g（行=%u，状态[%u]）\n",
            row, sequence_mismatch, state_mismatch, max_state_error,
            max_state_row, max_state_index);
+    printf("6. 随机数计数首个差异行=%u\n", first_rng_mismatch_row);
     for (unsigned index = 0u; index < sizeof(telemetry_regions) / sizeof(telemetry_regions[0]); ++index)
         printf("6.%u. 主遥测字段=%s，差异字节=%u\n", index + 1u,
                telemetry_regions[index].name, telemetry_diff[index]);

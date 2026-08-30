@@ -5,6 +5,80 @@
 #include <stdio.h>
 #include <string.h>
 
+static void clear_pointer(uint8_t *base, unsigned offset)
+{
+    memset(base + offset, 0, sizeof(void *));
+}
+
+/* 设备快照包含同一对象内部 backing 的进程虚拟地址。地址不是模型输出，
+ * 逐字段比较前仅归零 descriptor 的 data 指针，保留其余状态和配置字节。 */
+static void canonicalize_device_snapshot(uint8_t snapshot[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES])
+{
+    unsigned index;
+    const unsigned gyro_base = 0x450u;
+    const unsigned dss_base = 0x0a90u;
+    const unsigned mag_base = 0x0d40u;
+    const unsigned sada_base = 0x1020u;
+    const unsigned wheel_base = 0x1088u;
+    const unsigned mtq_base = 0x1268u;
+    const unsigned thruster_base = 0x13b8u;
+    const unsigned wheel_group_base = 0x1468u;
+    const unsigned mtq_group_base = 0x1530u;
+
+    for (index = 0u; index < 3u; ++index) {
+        const unsigned base = index * 0x170u;
+        clear_pointer(snapshot, base + 0x70u);
+        clear_pointer(snapshot, base + 0x108u);
+        clear_pointer(snapshot, base + 0x150u);
+    }
+    for (index = 0u; index < 2u; ++index) {
+        const unsigned base = gyro_base + index * 0x320u;
+        clear_pointer(snapshot, base + 0x60u);
+        clear_pointer(snapshot, base + 0x78u);
+        clear_pointer(snapshot, base + 0x120u);
+    }
+    for (index = 0u; index < 2u; ++index) {
+        const unsigned base = dss_base + index * 0x158u;
+        clear_pointer(snapshot, base + 0x50u);
+        clear_pointer(snapshot, base + 0x68u);
+        clear_pointer(snapshot, base + 0x118u);
+    }
+    for (index = 0u; index < 2u; ++index) {
+        const unsigned base = mag_base + index * 0x138u;
+        clear_pointer(snapshot, base + 0x58u);
+        clear_pointer(snapshot, base + 0x70u);
+        clear_pointer(snapshot, base + 0x118u);
+    }
+    (void)sada_base;
+    for (index = 0u; index < 4u; ++index)
+        clear_pointer(snapshot, wheel_base + index * 0x78u + 0x58u);
+    for (index = 0u; index < 6u; ++index)
+        clear_pointer(snapshot, mtq_base + index * 0x38u + 0x18u);
+    clear_pointer(snapshot, thruster_base + 0x18u);
+    clear_pointer(snapshot, thruster_base + 0x40u);
+    clear_pointer(snapshot, thruster_base + 0x68u);
+    clear_pointer(snapshot, thruster_base + 0x90u);
+    clear_pointer(snapshot, wheel_group_base + 0x08u);
+    clear_pointer(snapshot, wheel_group_base + 0x30u);
+    clear_pointer(snapshot, wheel_group_base + 0x60u);
+    clear_pointer(snapshot, mtq_group_base + 0x08u);
+    clear_pointer(snapshot, mtq_group_base + 0x30u);
+    clear_pointer(snapshot, mtq_group_base + 0x78u);
+}
+
+static int device_snapshot_equal(const uint8_t c_snapshot[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES],
+                                 const uint8_t elf_snapshot[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES])
+{
+    uint8_t c_canonical[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES];
+    uint8_t elf_canonical[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES];
+
+    memcpy(c_canonical, c_snapshot, sizeof(c_canonical));
+    memcpy(elf_canonical, elf_snapshot, sizeof(elf_canonical));
+    canonicalize_device_snapshot(c_canonical);
+    canonicalize_device_snapshot(elf_canonical);
+    return memcmp(c_canonical, elf_canonical, sizeof(c_canonical)) == 0;
+}
+
 static int compare_frame(const DpCShadowStateFrame *c_frame,
                          const DpCShadowStateFrame *elf_frame,
                          unsigned row)
@@ -37,8 +111,8 @@ static int compare_frame(const DpCShadowStateFrame *c_frame,
     }
     if (c_frame->devices_bytes == DP_DEVICE_GLOBAL_SNAPSHOT_BYTES &&
         elf_frame->devices_bytes == DP_DEVICE_GLOBAL_SNAPSHOT_BYTES) {
-        device_mismatch = memcmp(c_frame->device_globals, elf_frame->device_globals,
-                                 DP_DEVICE_GLOBAL_SNAPSHOT_BYTES) != 0;
+        device_mismatch = !device_snapshot_equal(c_frame->device_globals,
+                                                 elf_frame->device_globals);
     }
     if (state_mismatches != 0u || telemetry_mismatch || device_mismatch) {
         printf("行=%u 序号=%u 结果=失败 状态差异=%u/%u 遥测差异=%s 设备差异=%s\n",

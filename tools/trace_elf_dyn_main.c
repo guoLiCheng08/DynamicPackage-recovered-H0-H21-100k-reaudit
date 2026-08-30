@@ -11,6 +11,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/user.h>
 #include <sys/wait.h>
@@ -23,6 +24,10 @@
 #define ELF_OUTPUT_OFFSET 0x218760u
 #define ELF_STATE_SHM "/cfs_test_elf_state"
 #define ELF_T_OFFSET 0x2184c0u
+#define ELF_TIME_SECOND_DECIMAL_OFFSET 0x218680u
+#define ELF_TIME_SECOND_TOTAL_OFFSET 0x218688u
+#define ELF_TIME_CALENDAR_OFFSET 0x2186a0u
+#define ELF_TIME_TM_OFFSET 0x218be0u
 
 static int read_process_bytes(pid_t pid, unsigned long address, void *buffer, size_t bytes);
 
@@ -119,6 +124,18 @@ static int wait_for_input_sequence(const DpShadowReplayFrame *frame, uint32_t ex
     return frame->sequence == expected ? 0 : -1;
 }
 
+static int wait_for_post_ack(const DpCShadowStateFrame *frame, uint32_t expected)
+{
+    unsigned attempts = 0u;
+    while (__atomic_load_n(&frame->post_ack, __ATOMIC_ACQUIRE) < expected &&
+           attempts < 30000u) {
+        const struct timespec delay = {0, 1000000};
+        nanosleep(&delay, NULL);
+        ++attempts;
+    }
+    return __atomic_load_n(&frame->post_ack, __ATOMIC_ACQUIRE) >= expected ? 0 : -1;
+}
+
 static int touch_ready_file(const char *path)
 {
     FILE *ready;
@@ -138,6 +155,26 @@ static int read_process_double(pid_t pid, unsigned long address, double *value)
     if (errno != 0) return -1;
     memcpy(value, &bits, sizeof(*value));
     return 0;
+}
+
+static void print_seed_state(const double state[DP_STATE_DIM])
+{
+    unsigned index;
+
+    if (getenv("ELF_TRACE_DIAGNOSTIC") == NULL) {
+        return;
+    }
+    for (index = 0u; index < DP_STATE_DIM; ++index) {
+        printf("seed_y[%u]=%.17g\n", index, state[index]);
+    }
+}
+
+static uint32_t rng_record_count(const char *path)
+{
+    struct stat info;
+    if (path == NULL || path[0] == '\0' || stat(path, &info) != 0)
+        return 0u;
+    return (uint32_t)((uint64_t)info.st_size / sizeof(int32_t));
 }
 
 static int read_elf_ipc_payload(pid_t pid, uint8_t payload[DP_IPC_PAYLOAD_BYTES])
@@ -187,6 +224,7 @@ int main(int argc, char **argv)
     unsigned samples = argc >= 3 ? (unsigned)strtoul(argv[2], NULL, 10) : 1u;
     uint32_t expected_input_sequence = argc >= 4
         ? (uint32_t)strtoul(argv[3], NULL, 10) : 0u;
+    uint32_t active_input_sequence = 0u;
     unsigned captured = 0u;
     int status;
     int entry_breakpoint = 0;
@@ -194,6 +232,7 @@ int main(int argc, char **argv)
     const char *ready_path = getenv("ELF_TRACE_READY_FILE");
     const char *rng_arm_path = getenv("ELF_RNG_ARM_FILE");
     const char *state_log_path = getenv("ELF_STATE_LOG");
+    const char *state_shm_name = getenv("ELF_C_SHADOW_STATE_SHM");
     FILE *state_log = NULL;
     int state_fd;
     DpCShadowStateFrame *state_frame;
@@ -204,13 +243,16 @@ int main(int argc, char **argv)
         fprintf(stderr, "用法: %s ELF进程号 [采样次数]\n", argv[0]);
         return 2;
     }
+    if (state_shm_name == NULL || state_shm_name[0] != '/') {
+        state_shm_name = ELF_STATE_SHM;
+    }
     pid = (pid_t)strtol(argv[1], NULL, 10);
     if (process_base(pid, &base) != 0 || ptrace(PTRACE_ATTACH, pid, NULL, NULL) != 0 ||
         waitpid(pid, &status, 0) < 0 || !WIFSTOPPED(status)) {
         fprintf(stderr, "无法附加正式 ELF: %s\n", strerror(errno));
         return 3;
     }
-    state_fd = shm_open(ELF_STATE_SHM, O_CREAT | O_RDWR, 0600);
+    state_fd = shm_open(state_shm_name, O_CREAT | O_RDWR, 0600);
     input_fd = shm_open(DP_SHADOW_INPUT_SHM, O_RDONLY, 0);
     if (state_fd < 0 || input_fd < 0 ||
         ftruncate(state_fd, (off_t)sizeof(*state_frame)) != 0) {
@@ -235,6 +277,16 @@ int main(int argc, char **argv)
     state_frame->state_bytes = sizeof(state_frame->state);
     state_frame->devices_bytes = 0u;
     state_frame->seed_ready = 0u;
+    state_frame->seed_ack = 0u;
+    state_frame->post_ack = 0u;
+    memset(state_frame, 0, sizeof(*state_frame));
+    state_frame->magic = DP_C_SHADOW_STATE_MAGIC;
+    state_frame->version = DP_C_SHADOW_STATE_VERSION;
+    state_frame->state_bytes = sizeof(state_frame->state);
+    state_frame->devices_bytes = 0u;
+    state_frame->seed_ready = 0u;
+    state_frame->seed_ack = 0u;
+    state_frame->post_ack = 0u;
     if (state_log_path != NULL && state_log_path[0] != '\0') {
         state_log = fopen(state_log_path, "wb");
         if (state_log == NULL) {
@@ -283,9 +335,21 @@ int main(int argc, char **argv)
                 memcpy(&state_frame->state[index], &low, sizeof(low));
             }
             if (read_process_double(pid, base + ELF_T_OFFSET,
-                                    &state_frame->integration_time) == 0) {
+                                    &state_frame->seed_integration_time) == 0) {
+                (void)read_process_double(pid, base + ELF_TIME_SECOND_DECIMAL_OFFSET,
+                                          &state_frame->seed_time_second_decimal);
+                (void)read_process_double(pid, base + ELF_TIME_SECOND_TOTAL_OFFSET,
+                                          &state_frame->seed_time_second_total);
+                (void)read_process_bytes(pid, base + ELF_TIME_CALENDAR_OFFSET,
+                                          state_frame->seed_calendar,
+                                          sizeof(state_frame->seed_calendar));
+                (void)read_process_bytes(pid, base + ELF_TIME_TM_OFFSET,
+                                          &state_frame->seed_calendar_tm,
+                                          sizeof(state_frame->seed_calendar_tm));
+                (void)read_device_snapshot(pid, base, state_frame->seed_device_globals);
                 __atomic_store_n(&state_frame->seed_ready,
                                  DP_C_SHADOW_SEED_READY, __ATOMIC_RELEASE);
+                print_seed_state(state_frame->state);
             }
             if (captured == 0u && rng_arm_path != NULL && rng_arm_path[0] != '\0') {
                 FILE *arm = fopen(rng_arm_path, "w");
@@ -302,6 +366,8 @@ int main(int argc, char **argv)
                         expected_input_sequence, input_frame->sequence);
                 break;
             }
+            active_input_sequence = expected_input_sequence != 0u
+                ? expected_input_sequence : input_frame->sequence;
             regs.rip = base + ELF_DYN_MAIN_OFFSET;
             if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) != 0) break;
             entry_breakpoint = 0;
@@ -310,6 +376,17 @@ int main(int argc, char **argv)
         }
         if (ptrace(PTRACE_GETREGS, pid, NULL, &regs) != 0 ||
             restore_word(pid, return_address, return_saved) != 0) break;
+        for (unsigned attempts = 0u;
+             attempts < 30000u &&
+             __atomic_load_n(&state_frame->seed_ack, __ATOMIC_ACQUIRE) == 0u;
+             ++attempts) {
+            const struct timespec wait_time = {0, 1000000};
+            nanosleep(&wait_time, NULL);
+        }
+        if (__atomic_load_n(&state_frame->seed_ack, __ATOMIC_ACQUIRE) == 0u) {
+            fprintf(stderr, "等待纯C影子确认初始状态超时\n");
+            break;
+        }
         regs.rip = return_address;
         if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) != 0 ||
             patch_byte(pid, base + ELF_DYN_MAIN_OFFSET, &entry_saved) != 0) break;
@@ -332,15 +409,31 @@ int main(int argc, char **argv)
         state_frame->ipc_bytes =
             read_elf_ipc_payload(pid, state_frame->ipc_payload) == 0
             ? DP_IPC_PAYLOAD_BYTES : 0u;
-        state_frame->input_sequence = input_frame->sequence;
+        (void)read_process_double(pid, base + ELF_TIME_SECOND_DECIMAL_OFFSET,
+                                  &state_frame->time_second_decimal);
+        (void)read_process_double(pid, base + ELF_TIME_SECOND_TOTAL_OFFSET,
+                                  &state_frame->time_second_total);
+        (void)read_process_bytes(pid, base + ELF_TIME_CALENDAR_OFFSET,
+                                  state_frame->calendar,
+                                  sizeof(state_frame->calendar));
+        (void)read_process_bytes(pid, base + ELF_TIME_TM_OFFSET,
+                                  &state_frame->calendar_tm,
+                                  sizeof(state_frame->calendar_tm));
+        state_frame->input_sequence = active_input_sequence;
+        state_frame->reserved = rng_record_count(getenv("DP_RNG_RECORD_FILE"));
         __atomic_store_n(&state_frame->sequence, captured + 1u, __ATOMIC_RELEASE);
         if (state_log != NULL) {
             (void)fwrite(state_frame, sizeof(*state_frame), 1u, state_log);
             (void)fflush(state_log);
         }
         ++captured;
+        if (getenv("ELF_TRACE_DISABLE_POST_ACK") == NULL && captured < samples &&
+            wait_for_post_ack(state_frame, captured) != 0) {
+            fprintf(stderr, "等待纯C影子确认返回快照超时\n");
+            break;
+        }
         if (expected_input_sequence != 0u)
-            expected_input_sequence = input_frame->sequence + 1u;
+            ++expected_input_sequence;
         return_breakpoint = 0;
         entry_breakpoint = 1;
     }
@@ -354,7 +447,7 @@ int main(int argc, char **argv)
     if (state_frame != MAP_FAILED) (void)munmap(state_frame, sizeof(*state_frame));
     if (input_frame != MAP_FAILED) (void)munmap(input_frame, sizeof(*input_frame));
     printf("1. 结果=%s\n2. ELF dyn_main返回采样=%u\n3. 状态维度=%u\n4. 状态共享内存=%s\n5. 输入序号闸门=%s\n",
-           captured == samples ? "通过" : "失败", captured, DP_STATE_DIM, ELF_STATE_SHM,
+           captured == samples ? "通过" : "失败", captured, DP_STATE_DIM, state_shm_name,
            expected_input_sequence != 0u ? "启用" : "未启用");
     return captured == samples ? 0 : 1;
 }

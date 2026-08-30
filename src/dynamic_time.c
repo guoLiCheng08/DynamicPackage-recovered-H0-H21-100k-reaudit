@@ -244,8 +244,9 @@ void dp_time_seed(const double calendar[6], double second_decimal,
                   double second_total)
 {
     if (calendar == NULL) return;
+    /* tm_sec 必须保留完整秒值；小数秒单独由 dp_time_second_decimal 保存。 */
     TimeInit(calendar[0], calendar[1], calendar[2], calendar[3],
-             calendar[4], calendar[5] - floor(calendar[5]));
+             calendar[4], calendar[5]);
     dp_time_calendar_array[0] = calendar[0];
     dp_time_calendar_array[1] = calendar[1];
     dp_time_calendar_array[2] = calendar[2];
@@ -254,6 +255,15 @@ void dp_time_seed(const double calendar[6], double second_decimal,
     dp_time_calendar_array[5] = calendar[5];
     dp_time_second_decimal = second_decimal;
     dp_time_second_total = second_total;
+}
+
+void dp_time_seed_full(const double calendar[6], double second_decimal,
+                       double second_total, const struct tm *calendar_tm)
+{
+    dp_time_seed(calendar, second_decimal, second_total);
+    if (calendar_tm != NULL) {
+        dp_time_calendar_tm = *calendar_tm;
+    }
 }
 
 void TimeAdd(double seconds)
@@ -273,7 +283,7 @@ void TimeAdd(double seconds)
     dp_time_calendar_array[3] = (double)dp_time_calendar_tm.tm_hour;
     dp_time_calendar_array[4] = (double)dp_time_calendar_tm.tm_min;
     dp_time_calendar_array[5] = (double)dp_time_calendar_tm.tm_sec +
-                                 dp_time_second_decimal;
+                               dp_time_second_decimal;
 }
 
 void TimeArrayGet(double out_calendar[6])
