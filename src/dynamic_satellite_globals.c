@@ -3,6 +3,7 @@
 #include "dynamic_core_bridge.h"
 #include "dynamic_core_environment.h"
 #include "dynamic_core_layout.h"
+#include "c_shadow_state_ipc.h"
 #include "dynamic_dynamics.h"
 #include "dynamic_environment.h"
 #include "dynamic_flex.h"
@@ -15,6 +16,7 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define DP_SAT_INERTIA_DESCRIPTOR_OFFSET 0x08u
@@ -332,6 +334,7 @@ static unsigned dp_global_sat_model_is_sada_history;
 /* 原 dyn_main 的 MTQ 路径在本步使用前一 CoreDynamic 环境更新留下的 B_I_static。 */
 static DpVec3 dp_prior_magnetic_body;
 static unsigned dp_prior_magnetic_body_valid;
+static unsigned long dp_rhs_context_call_index;
 #ifdef DP_DIAGNOSTIC_SADA_STAGE_TRACE
 static unsigned dp_sada_stage_trace_count;
 #endif
@@ -342,6 +345,90 @@ static DpMatrix dp_sat_matrix_load(size_t offset)
 
     memcpy(&matrix, &Sat.raw[offset], sizeof(matrix));
     return matrix;
+}
+
+void dp_global_set_prior_magnetic_body(const double magnetic_body[3])
+{
+    if (magnetic_body == NULL) {
+        memset(&dp_prior_magnetic_body, 0, sizeof(dp_prior_magnetic_body));
+        dp_prior_magnetic_body_valid = 0u;
+        return;
+    }
+    dp_prior_magnetic_body.x = magnetic_body[0];
+    dp_prior_magnetic_body.y = magnetic_body[1];
+    dp_prior_magnetic_body.z = magnetic_body[2];
+    dp_prior_magnetic_body_valid = 1u;
+}
+
+static void dp_trace_rhs_context(const double state[DP_STATE_DIM],
+                                 const DpVec3 *angular_momentum,
+                                 const DpMatrix *coupling,
+                                 const DpMatrix *modal_a,
+                                 const DpMatrix *modal_d,
+                                 const DpMatrix *sada_command_momentum_map,
+                                 const DpMatrix *sada_modal_pre_map,
+                                 const DpMatrix *sada_modal_acceleration_map,
+                                 const DpFlexSadaDrive *sada_drive)
+{
+    static int initialized;
+    static unsigned long target_sequence;
+    static FILE *output;
+    const char *path;
+    DpRhsContextTrace record;
+    unsigned long sequence;
+
+    ++dp_rhs_context_call_index;
+    if (initialized == 0) {
+        const char *target_text;
+
+        initialized = 1;
+        path = getenv("C_SHADOW_RHS_CONTEXT_TRACE");
+        target_text = getenv("C_SHADOW_RHS_CONTEXT_SEQUENCE");
+        target_sequence = target_text == NULL ? 0ul : strtoul(target_text, NULL, 10);
+        if (path != NULL && path[0] != '\0' && target_sequence != 0ul) {
+            output = fopen(path, "wb");
+        }
+    }
+    if (output == NULL) {
+        return;
+    }
+    sequence = (dp_rhs_context_call_index - 1ul) / 4ul + 1ul;
+    if (sequence != target_sequence) {
+        return;
+    }
+    if (state == NULL || angular_momentum == NULL || coupling == NULL ||
+        modal_a == NULL || modal_d == NULL || sada_command_momentum_map == NULL ||
+        sada_modal_pre_map == NULL || sada_modal_acceleration_map == NULL ||
+        sada_drive == NULL || coupling->data == NULL || modal_a->data == NULL ||
+        modal_d->data == NULL || sada_command_momentum_map->data == NULL ||
+        sada_modal_pre_map->data == NULL || sada_modal_acceleration_map->data == NULL) {
+        return;
+    }
+    memset(&record, 0, sizeof(record));
+    record.sequence = (uint32_t)sequence;
+    record.stage = (uint32_t)((dp_rhs_context_call_index - 1ul) % 4ul + 1ul);
+    memcpy(record.state, state, sizeof(record.state));
+    memcpy(record.angular_momentum, angular_momentum, sizeof(record.angular_momentum));
+    memcpy(record.torque, L_c_B_mem, sizeof(record.torque));
+    memcpy(record.magnetic_inertial, B_I_static_mem, sizeof(record.magnetic_inertial));
+    memcpy(record.magnetic_body_prior, &dp_prior_magnetic_body,
+           sizeof(record.magnetic_body_prior));
+    memcpy(record.inertia, J_c_B_mem, sizeof(record.inertia));
+    memcpy(record.sada_command_angle, sada_drive->command_angle,
+           sizeof(record.sada_command_angle));
+    memcpy(record.sada_angular_acceleration, sada_drive->angular_acceleration,
+           sizeof(record.sada_angular_acceleration));
+    memcpy(record.coupling, coupling->data, sizeof(record.coupling));
+    memcpy(record.modal_a, modal_a->data, sizeof(record.modal_a));
+    memcpy(record.modal_d, modal_d->data, sizeof(record.modal_d));
+    memcpy(record.sada_command_momentum_map, sada_command_momentum_map->data,
+           sizeof(record.sada_command_momentum_map));
+    memcpy(record.sada_modal_pre_map, sada_modal_pre_map->data,
+           sizeof(record.sada_modal_pre_map));
+    memcpy(record.sada_modal_acceleration_map, sada_modal_acceleration_map->data,
+           sizeof(record.sada_modal_acceleration_map));
+    (void)fwrite(&record, sizeof(record), 1u, output);
+    (void)fflush(output);
 }
 
 static void dp_sat_matrix_store(size_t offset, const DpMatrix *matrix)
@@ -697,6 +784,7 @@ int dp_differential_equation_global_reset(void)
     memset(&SADA, 0, sizeof(SADA));
     memset(&dp_prior_magnetic_body, 0, sizeof(dp_prior_magnetic_body));
     dp_prior_magnetic_body_valid = 0u;
+    dp_rhs_context_call_index = 0ul;
     dp_global_sada_reaction_enabled = 1u;
     dp_global_sat_model_is_sada_history = 0u;
     dp_global_default_sat_descriptors_sync();
@@ -785,6 +873,10 @@ void differential_equation(double dydt[DP_STATE_DIM], const double y[DP_STATE_DI
             : NULL;
     context.flex.sada_modal_pre_map_3x3 = &sada_modal_pre_map;
     context.flex.sada_modal_acceleration_map_3xn = &sada_modal_acceleration_map;
+
+    dp_trace_rhs_context(y, &angular_momentum, &coupling, &modal_a, &modal_d,
+                         &sada_command_momentum_map, &sada_modal_pre_map,
+                         &sada_modal_acceleration_map, &sada_drive);
 
     if (dp_differential_equation_33(dydt, y, &context) != 0) {
         memset(dydt, 0, DP_STATE_DIM * sizeof(double));
@@ -973,6 +1065,9 @@ void CoreDynamic(void *core_dynamic_output, const void *core_dyn_input)
     memcpy(pre_state, y, sizeof(pre_state));
     TimeAdd(step_time);
     TimeArrayGet((double *)&calendar);
+    /* 原 CoreDynamic 在时间推进后立即调用 MagUpdate，既为本步环境刷新
+     * B_I_static，也保留给后续 GetInertialMag/外部调用的全局副作用。 */
+    MagUpdate(&calendar);
 
     external_body_data[0] = input->thruster_vector_0.x;
     external_body_data[1] = input->thruster_vector_0.y;
@@ -992,9 +1087,11 @@ void CoreDynamic(void *core_dynamic_output, const void *core_dyn_input)
 
     wheel_torque = input->wheel_group_vector_0;
     thruster_torque = input->thruster_vector_1;
-    total_torque_data[0] = -wheel_torque.x + thruster_torque.x;
-    total_torque_data[1] = -wheel_torque.y + thruster_torque.y;
-    total_torque_data[2] = -wheel_torque.z + thruster_torque.z;
+    /* UpdateTorque 严格按 SatTorque +0x00(轮)、+0x10(MTQ)、+0x20(推进器)
+     * 顺序累加；不能交换后两项，否则长回放会产生浮点舍入分叉。 */
+    total_torque_data[0] = -wheel_torque.x;
+    total_torque_data[1] = -wheel_torque.y;
+    total_torque_data[2] = -wheel_torque.z;
 
     position_data[0] = y[7];
     position_data[1] = y[8];
@@ -1028,6 +1125,9 @@ void CoreDynamic(void *core_dynamic_output, const void *core_dyn_input)
         total_torque_data[1] += magnetic_torque_data[1];
         total_torque_data[2] += magnetic_torque_data[2];
     }
+    total_torque_data[0] += thruster_torque.x;
+    total_torque_data[1] += thruster_torque.y;
+    total_torque_data[2] += thruster_torque.z;
     L_c_B_mem[0] = total_torque_data[0];
     L_c_B_mem[1] = total_torque_data[1];
     L_c_B_mem[2] = total_torque_data[2];

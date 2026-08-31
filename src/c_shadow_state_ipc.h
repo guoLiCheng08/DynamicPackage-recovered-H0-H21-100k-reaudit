@@ -12,11 +12,32 @@
 #define DP_C_SHADOW_STATE_SHM "/cfs_test_c_shadow_state"
 #define DP_C_SHADOW_STATE_SHM_ENV "C_SHADOW_STATE_SHM"
 #define DP_C_SHADOW_STATE_MAGIC UINT32_C(0x43534844)
-#define DP_C_SHADOW_STATE_VERSION 9u
+#define DP_C_SHADOW_STATE_VERSION 13u
 #define DP_DEVICE_GLOBAL_SNAPSHOT_BYTES 0x1640u
 #define DP_MODEL_GLOBAL_SNAPSHOT_BYTES 0x1330u
 #define DP_C_SHADOW_SEED_READY UINT32_C(0x53454544)
 #define DP_IPC_PAYLOAD_BYTES (DP_IPC_SHM_BYTES - DP_IPC_RWLOCK_BYTES)
+
+/* dynamics_flex 进入时的纯数值上下文。该记录不含进程内指针，供 C/ELF
+ * 在同一 RK4 子步逐字段比较；默认回放不生成。 */
+typedef struct {
+    uint32_t sequence;
+    uint32_t stage;
+    double state[DP_STATE_DIM];
+    double angular_momentum[3];
+    double torque[3];
+    double magnetic_inertial[3];
+    double magnetic_body_prior[3];
+    double inertia[9];
+    double sada_command_angle[2];
+    double sada_angular_acceleration[2];
+    double coupling[30];
+    double modal_a[100];
+    double modal_d[100];
+    double sada_command_momentum_map[9];
+    double sada_modal_pre_map[9];
+    double sada_modal_acceleration_map[30];
+} DpRhsContextTrace;
 
 static inline const char *dp_c_shadow_state_shm_name(void)
 {
@@ -56,6 +77,12 @@ typedef struct {
     /* ELF 0x215598..0x2168c8：步长、惯量、Sat、SatTorque 等动力学全局对象。
      * 仅作为共同初态使用；正式积分后不再读取 ELF。 */
     uint8_t seed_model_globals[DP_MODEL_GLOBAL_SNAPSHOT_BYTES];
+    /* 上述连续区只包含三个 descriptor，不包含其 data 指针所指的 backing。
+     * 恢复时必须复制实际三维值，不能只重绑 C 侧指针。 */
+    double seed_h_w_b[3];
+    double seed_l_c_b[3];
+    double seed_b_i_static[3];
+    double seed_prior_magnetic_body[3];
     uint8_t seed_device_globals[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES];
     uint8_t device_globals[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES];
     uint8_t ipc_payload[DP_IPC_PAYLOAD_BYTES];

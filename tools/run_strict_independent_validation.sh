@@ -27,6 +27,8 @@ c_gaussian_callers="$case_dir/c_gaussian_callers.txt"
 c_rng_stages="$case_dir/c_rng_stages.txt"
 elf_rhs="$case_dir/elf_rhs.bin"
 c_rhs="$case_dir/c_rhs.bin"
+elf_rhs_context="$case_dir/elf_rhs_context.bin"
+c_rhs_context="$case_dir/c_rhs_context.bin"
 elf_commands="$case_dir/elf_commands.txt"
 input_delivery="$case_dir/input_delivery.txt"
 ready="$case_dir/trace.ready"
@@ -59,6 +61,7 @@ cleanup()
 trap cleanup EXIT
 
 make shadow-runtime trace-elf-dyn-main trace-c-rhs run-dual-sequence compare-state-logs \
+    compare-rhs-context \
     rng-record start-gate >/dev/null
 touch "$rng"
 
@@ -75,6 +78,8 @@ ELF_C_SHADOW_STATE_SHM="$state_shm" \
 C_SHADOW_READY_FILE="$c_ready" \
 C_SHADOW_STATE_LOG="$case_dir/c_state.bin" \
 C_SHADOW_STARTUP_PRIMER=2 \
+C_SHADOW_RHS_CONTEXT_TRACE="${C_SHADOW_TRACE_RHS_CONTEXT:+$c_rhs_context}" \
+C_SHADOW_RHS_CONTEXT_SEQUENCE="${C_SHADOW_RHS_SEQUENCE:-1986}" \
 "$c_runtime_bin" "$runtime_steps" >"$case_dir/c_runtime.log" 2>&1 &
 c_pid=$!
 
@@ -114,10 +119,13 @@ ELF_COMMAND_TRACE_FILE="$elf_commands" \
 DP_RNG_RECORD_FILE="$rng" \
 ELF_TRACE_REQUIRE_INITIALIZED=1 \
 ELF_STATE_LOG="$case_dir/elf_state.bin" \
+ELF_SEED_SNAPSHOT_FILE="$case_dir/elf_seed.bin" \
 ELF_TRACE_READY_FILE="$ready" \
 ELF_TRACE_DISABLE_POST_ACK=1 \
 ELF_RHS_TRACE_FILE="$elf_rhs" \
 ELF_RHS_TRACE_SEQUENCE="${C_SHADOW_RHS_SEQUENCE:-1986}" \
+ELF_RHS_CONTEXT_TRACE_FILE="${C_SHADOW_TRACE_RHS_CONTEXT:+$elf_rhs_context}" \
+ELF_RHS_CONTEXT_SEQUENCE="${C_SHADOW_RHS_SEQUENCE:-1986}" \
 ./build/trace_elf_dyn_main "$elf_pid" "$runtime_steps" 1 >"$case_dir/elf_trace.log" 2>&1 &
 trace_pid=$!
 
@@ -178,20 +186,33 @@ if [[ -n "$c_trace_pid" ]]; then
 fi
 wait "$trace_pid"
 trace_pid=""
-./build/compare_state_logs "$case_dir/c_state.bin" "$case_dir/elf_state.bin" \
-    >"$case_dir/compare.log" 2>&1
+if [[ "${C_SHADOW_TRACE_RHS_CONTEXT:-0}" == "1" ]]; then
+    ./build/compare_rhs_context "$c_rhs_context" "$elf_rhs_context" \
+        >"$case_dir/rhs_context_compare.log" 2>&1 || true
+fi
+compare_status=0
+if ! ./build/compare_state_logs "$case_dir/c_state.bin" "$case_dir/elf_state.bin" \
+    >"$case_dir/compare.log" 2>&1; then
+    compare_status=1
+fi
 
 {
-    echo "1. 结果=通过"
+    if [[ "$compare_status" == "0" ]]; then
+        echo "1. 结果=通过"
+    else
+        echo "1. 结果=失败"
+    fi
     echo "2. 模式=严格独立双路回放"
     echo "3. 积分步数=$steps"
     awk -F= '/仿真时长=/{print "4. 仿真时长=" $2}' "$case_dir/input_replay.log"
     awk -F= '/输入交付不一致=/{print "5. 输入交付不一致=" $2}' "$case_dir/input_replay.log"
-    awk -F= 'NR == 1 {print "6. 比较结果=" $2} NR == 2 {print "7. 逐步比较=" $2} NR == 3 {print "8. 失败行=" $2}' \
-        "$case_dir/compare.log"
+    awk -F= '/^1\. 结果=/{print "6. 比较结果=" $2} \
+               /^2\. 逐步比较=/{print "7. 逐步比较=" $2} \
+               /^3\. 失败行=/{print "8. 失败行=" $2}' "$case_dir/compare.log"
     echo "9. 说明=C 仅在首步使用 ELF 初态；后续时间、状态、设备和遥测均由 C 自行推进。"
     echo "10. 输入原则=C 与 ELF 使用同一份 ELF 入口实际控制结构；请求/实际不一致单列，不计入模型通过。"
 } >"$case_dir/report.txt"
 
 cat "$case_dir/report.txt"
 echo "报告目录=$case_dir"
+exit "$compare_status"

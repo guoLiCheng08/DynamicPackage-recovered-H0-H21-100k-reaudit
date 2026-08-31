@@ -37,6 +37,100 @@
 
 static int read_process_bytes(pid_t pid, unsigned long address, void *buffer, size_t bytes);
 
+static void write_seed_snapshot(const DpCShadowStateFrame *frame)
+{
+    const char *path = getenv("ELF_SEED_SNAPSHOT_FILE");
+    FILE *output;
+
+    if (path == NULL || path[0] == '\0' || frame == NULL) {
+        return;
+    }
+    output = fopen(path, "wb");
+    if (output == NULL) {
+        return;
+    }
+    (void)fwrite(frame, sizeof(*frame), 1u, output);
+    (void)fclose(output);
+}
+
+static int read_vector_descriptor_data(pid_t pid, unsigned long descriptor_address,
+                                       double values[3])
+{
+    unsigned long data_address;
+
+    if (read_process_bytes(pid, descriptor_address + 8u, &data_address,
+                           sizeof(data_address)) != 0 || data_address == 0u) {
+        return -1;
+    }
+    return read_process_bytes(pid, data_address, values, 3u * sizeof(values[0]));
+}
+
+static int read_matrix_descriptor_data(pid_t pid, unsigned long descriptor_address,
+                                       double *values, size_t value_count)
+{
+    unsigned long data_address;
+
+    if (read_process_bytes(pid, descriptor_address + 16u, &data_address,
+                           sizeof(data_address)) != 0 || data_address == 0u) {
+        return -1;
+    }
+    return read_process_bytes(pid, data_address, values, value_count * sizeof(values[0]));
+}
+
+static int capture_rhs_context(pid_t pid, unsigned long base, unsigned long state_address,
+                               uint32_t sequence, uint32_t stage,
+                               DpRhsContextTrace *record)
+{
+    const unsigned long sat = base + ELF_MODEL_GLOBALS_OFFSET + 0x148u;
+    const unsigned long sada = base + 0x216980u;
+
+    if (record == NULL) {
+        return -1;
+    }
+    memset(record, 0, sizeof(*record));
+    record->sequence = sequence;
+    record->stage = stage;
+    return read_process_bytes(pid, state_address, record->state, sizeof(record->state)) ||
+           read_vector_descriptor_data(pid, base + ELF_MODEL_GLOBALS_OFFSET + 0x0b8u,
+                                       record->angular_momentum) ||
+           read_vector_descriptor_data(pid, base + ELF_MODEL_GLOBALS_OFFSET + 0x0c8u,
+                                       record->torque) ||
+           read_vector_descriptor_data(pid, base + ELF_MODEL_GLOBALS_OFFSET + 0x118u,
+                                       record->magnetic_inertial) ||
+           read_vector_descriptor_data(pid, base + ELF_MODEL_GLOBALS_OFFSET + 0x238u,
+                                       record->magnetic_body_prior) ||
+           read_process_bytes(pid, base + ELF_MODEL_GLOBALS_OFFSET + 0x068u,
+                              record->inertia, sizeof(record->inertia)) ||
+           read_process_bytes(pid, sada + 0x08u, record->sada_command_angle,
+                              sizeof(record->sada_command_angle)) ||
+           read_process_bytes(pid, sada + 0x38u, record->sada_angular_acceleration,
+                              sizeof(record->sada_angular_acceleration)) ||
+           read_matrix_descriptor_data(pid, sat + 0x898u, record->coupling, 30u) ||
+           read_matrix_descriptor_data(pid, sat + 0xa00u, record->modal_a, 100u) ||
+           read_matrix_descriptor_data(pid, sat + 0xd38u, record->modal_d, 100u) ||
+           read_matrix_descriptor_data(pid, sat + 0x9a0u,
+                                       record->sada_command_momentum_map, 9u) ||
+           read_matrix_descriptor_data(pid, sat + 0x4a8u,
+                                       record->sada_modal_pre_map, 9u) ||
+           read_matrix_descriptor_data(pid, sat + 0x688u,
+                                       record->sada_modal_acceleration_map, 30u) ? -1 : 0;
+}
+
+static void capture_seed_model_backing(pid_t pid, unsigned long base,
+                                       DpCShadowStateFrame *frame)
+{
+    /* 这些 descriptor 自身位于连续模型区，但它们的 backing 位于独立地址。
+     * 只复制 descriptor 会把 C 侧初态悄悄置为旧值或零值。 */
+    (void)read_vector_descriptor_data(pid, base + ELF_MODEL_GLOBALS_OFFSET + 0x0b8u,
+                                      frame->seed_h_w_b);
+    (void)read_vector_descriptor_data(pid, base + ELF_MODEL_GLOBALS_OFFSET + 0x0c8u,
+                                      frame->seed_l_c_b);
+    (void)read_vector_descriptor_data(pid, base + ELF_MODEL_GLOBALS_OFFSET + 0x118u,
+                                      frame->seed_b_i_static);
+    (void)read_vector_descriptor_data(pid, base + ELF_MODEL_GLOBALS_OFFSET + 0x238u,
+                                      frame->seed_prior_magnetic_body);
+}
+
 static void write_command_trace(FILE *trace, uint32_t sequence,
                                 const uint8_t command[ELF_DEVICE_COMMAND_BYTES])
 {
@@ -304,10 +398,15 @@ int main(int argc, char **argv)
     FILE *state_log = NULL;
     FILE *command_trace = NULL;
     FILE *rhs_trace = NULL;
+    FILE *rhs_context_trace = NULL;
     const char *rhs_trace_path = getenv("ELF_RHS_TRACE_FILE");
     const char *rhs_trace_sequence_text = getenv("ELF_RHS_TRACE_SEQUENCE");
     const uint32_t rhs_trace_sequence = rhs_trace_sequence_text == NULL ? 0u :
         (uint32_t)strtoul(rhs_trace_sequence_text, NULL, 10);
+    const char *rhs_context_trace_path = getenv("ELF_RHS_CONTEXT_TRACE_FILE");
+    const char *rhs_context_sequence_text = getenv("ELF_RHS_CONTEXT_SEQUENCE");
+    const uint32_t rhs_context_sequence = rhs_context_sequence_text == NULL ?
+        rhs_trace_sequence : (uint32_t)strtoul(rhs_context_sequence_text, NULL, 10);
     uint8_t active_command[ELF_DEVICE_COMMAND_BYTES] = {0};
     unsigned long active_command_address = 0u;
     int state_fd;
@@ -376,6 +475,16 @@ int main(int argc, char **argv)
     if (rhs_trace_path != NULL && rhs_trace_path[0] != '\0') {
         rhs_trace = fopen(rhs_trace_path, "wb");
         if (rhs_trace == NULL) {
+            if (state_log != NULL) (void)fclose(state_log);
+            (void)restore_word(pid, base + ELF_DYN_MAIN_OFFSET, entry_saved);
+            (void)ptrace(PTRACE_DETACH, pid, NULL, NULL);
+            return 3;
+        }
+    }
+    if (rhs_context_trace_path != NULL && rhs_context_trace_path[0] != '\0') {
+        rhs_context_trace = fopen(rhs_context_trace_path, "wb");
+        if (rhs_context_trace == NULL) {
+            if (rhs_trace != NULL) (void)fclose(rhs_trace);
             if (state_log != NULL) (void)fclose(state_log);
             (void)restore_word(pid, base + ELF_DYN_MAIN_OFFSET, entry_saved);
             (void)ptrace(PTRACE_DETACH, pid, NULL, NULL);
@@ -488,6 +597,18 @@ int main(int argc, char **argv)
         }
         if (rhs_entry_breakpoint != 0 &&
             regs.rip == base + ELF_DIFFERENTIAL_EQUATION_OFFSET + 1u) {
+            if (rhs_context_trace != NULL &&
+                active_input_sequence == rhs_context_sequence) {
+                DpRhsContextTrace context;
+
+                if (capture_rhs_context(pid, base, (unsigned long)regs.rsi,
+                                        active_input_sequence, rhs_samples + 1u,
+                                        &context) != 0 ||
+                    fwrite(&context, sizeof(context), 1u, rhs_context_trace) != 1u) {
+                    break;
+                }
+                (void)fflush(rhs_context_trace);
+            }
             rhs_output_address = regs.rdi;
             rhs_return_address = (unsigned long)ptrace(PTRACE_PEEKDATA, pid,
                                                         (void *)regs.rsp, NULL);
@@ -603,7 +724,9 @@ int main(int argc, char **argv)
                 (void)read_process_bytes(pid, base + ELF_MODEL_GLOBALS_OFFSET,
                                           state_frame->seed_model_globals,
                                           sizeof(state_frame->seed_model_globals));
+                capture_seed_model_backing(pid, base, state_frame);
                 (void)read_device_snapshot(pid, base, state_frame->seed_device_globals);
+                write_seed_snapshot(state_frame);
                 __atomic_store_n(&state_frame->seed_ready,
                                  DP_C_SHADOW_SEED_READY, __ATOMIC_RELEASE);
                 print_seed_state(state_frame->state);
@@ -622,7 +745,9 @@ int main(int argc, char **argv)
                 ? expected_input_sequence : input_frame->sequence;
             if (read_process_bytes(pid, active_command_address, active_command,
                                    sizeof(active_command)) != 0) break;
-            if (rhs_trace != NULL && active_input_sequence == rhs_trace_sequence) {
+            if ((rhs_trace != NULL && active_input_sequence == rhs_trace_sequence) ||
+                (rhs_context_trace != NULL &&
+                 active_input_sequence == rhs_context_sequence)) {
                 rhs_samples = 0u;
                 if (patch_byte(pid, base + ELF_DIFFERENTIAL_EQUATION_OFFSET,
                                &rhs_entry_saved) != 0) break;
@@ -693,6 +818,8 @@ int main(int argc, char **argv)
             (void)read_process_bytes(pid, base + ELF_MODEL_GLOBALS_OFFSET,
                                      state_frame->seed_model_globals,
                                      sizeof(state_frame->seed_model_globals));
+            capture_seed_model_backing(pid, base, state_frame);
+            write_seed_snapshot(state_frame);
             memcpy(state_frame->seed_calendar, state_frame->calendar,
                    sizeof(state_frame->seed_calendar));
             state_frame->seed_calendar_tm = state_frame->calendar_tm;
@@ -771,6 +898,7 @@ int main(int argc, char **argv)
     if (state_log != NULL) (void)fclose(state_log);
     if (command_trace != NULL) (void)fclose(command_trace);
     if (rhs_trace != NULL) (void)fclose(rhs_trace);
+    if (rhs_context_trace != NULL) (void)fclose(rhs_context_trace);
     if (state_frame != MAP_FAILED) (void)munmap(state_frame, sizeof(*state_frame));
     if (input_frame != MAP_FAILED) (void)munmap(input_frame, sizeof(*input_frame));
     printf("1. 结果=%s\n2. ELF dyn_main返回采样=%u\n3. 状态维度=%u\n4. 状态共享内存=%s\n5. 输入序号闸门=%s\n",

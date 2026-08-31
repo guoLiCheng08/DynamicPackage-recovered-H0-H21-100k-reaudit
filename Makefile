@@ -10,7 +10,7 @@ SRC := src/dynamic_rng.c src/dynamic_math.c src/dynamic_devices.c src/dynamic_de
 OBJ := $(SRC:src/%.c=$(BUILD)/%.o)
 LIB := $(BUILD)/libdynamicpackage_recovered.a
 
-.PHONY: all clean selftest shadow-runtime compare-state compare-state-frames compare-state-logs compare-shadow-stats analyze-rk4-rhs trace-c-rhs dump-sada-frame rng-record start-gate publish-dual-input run-dual-sequence trace-elf-dyn-main reset-elf-runtime full-shadow-validation import-gold compare-matrix send-dyn-tele-gold check-h0-fifty check-h15-global-y check-h16-h17-global-y check-h4-h5-h7-global-y check-h26-high-ecc-cross-command check-h27-third-seed-cross-command check-h28-dyn-main-array check-h29-get-desk-command check-h30-startup-chain check-h31-get-desk-lifecycle check-h32-high-ecc-safe-boundary check-h33-ipc-getter-invalid check-h34-circular-equatorial check-h35-near-parabolic
+.PHONY: all clean selftest shadow-runtime compare-state compare-state-frames compare-state-logs compare-shadow-stats compare-rhs-context analyze-rk4-rhs trace-c-rhs dump-sada-frame rng-record start-gate publish-dual-input run-dual-sequence trace-elf-dyn-main reset-elf-runtime full-shadow-validation import-gold compare-matrix send-dyn-tele-gold check-h0-fifty check-h15-global-y check-h16-h17-global-y check-h4-h5-h7-global-y check-h26-high-ecc-cross-command check-h27-third-seed-cross-command check-h28-dyn-main-array check-h29-get-desk-command check-h30-startup-chain check-h31-get-desk-lifecycle check-h32-high-ecc-safe-boundary check-h33-ipc-getter-invalid check-h34-circular-equatorial check-h35-near-parabolic
 
 all: $(LIB)
 
@@ -45,6 +45,9 @@ compare-state-logs: all
 
 compare-shadow-stats: all
 	$(CC) $(CPPFLAGS) $(CFLAGS) tools/compare_shadow_stats.c -lm -pthread -lrt -o $(BUILD)/compare_shadow_stats
+
+compare-rhs-context: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) tools/compare_rhs_context.c -o $(BUILD)/compare_rhs_context
 
 analyze-rk4-rhs: all
 	$(CC) $(CPPFLAGS) $(CFLAGS) tools/analyze_rk4_rhs.c -o $(BUILD)/analyze_rk4_rhs

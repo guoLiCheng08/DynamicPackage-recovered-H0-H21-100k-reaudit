@@ -30,6 +30,8 @@ extern DpVector L_c_B;
 /* 原 ELF B_I_static：惯性系静态磁场三维 descriptor。 */
 extern double B_I_static_mem[3];
 extern DpVector B_I_static;
+/* ELF CoreDynamic 的 g_6157d0：上一拍机体系磁场，供本拍 MTQ 力矩使用。 */
+void dp_global_set_prior_magnetic_body(const double magnetic_body[3]);
 /* 原 ELF ABI：rdi 为输出 DpVector，从全局 B_I_static 复制三元素。 */
 void GetInertialMag(DpVector *magnetic_gci_out_3);
 

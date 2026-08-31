@@ -89,7 +89,9 @@ static void restore_seed_actuator_devices(
 }
 
 static void restore_seed_model_globals(
-    const uint8_t snapshot[DP_MODEL_GLOBAL_SNAPSHOT_BYTES])
+    const uint8_t snapshot[DP_MODEL_GLOBAL_SNAPSHOT_BYTES],
+    const double seed_h_w_b[3], const double seed_l_c_b[3],
+    const double seed_b_i_static[3], const double seed_prior_magnetic_body[3])
 {
     /* ELF 0x215598 起的连续区域。复制数值后仅重建 C 进程内 descriptor 指针，
      * 绝不保留 ELF 虚拟地址。 */
@@ -106,6 +108,10 @@ static void restore_seed_model_globals(
     J_c_B.data = J_c_B_mem;
     J_c_B_inv.data = J_c_B_inv_mem;
     B_I_static.data = B_I_static_mem;
+    memcpy(H_w_B_mem, seed_h_w_b, sizeof(H_w_B_mem));
+    memcpy(L_c_B_mem, seed_l_c_b, sizeof(L_c_B_mem));
+    memcpy(B_I_static_mem, seed_b_i_static, sizeof(B_I_static_mem));
+    dp_global_set_prior_magnetic_body(seed_prior_magnetic_body);
     SatParaInit();
     TorqueInit();
     (void)dp_global_restore_sat_model_from_runtime();
@@ -305,7 +311,11 @@ int main(int argc, char **argv)
         t = integration_time;
         restore_seed_measurement_devices(elf_seed_frame->seed_device_globals);
         restore_seed_actuator_devices(elf_seed_frame->seed_device_globals);
-        restore_seed_model_globals(elf_seed_frame->seed_model_globals);
+        restore_seed_model_globals(elf_seed_frame->seed_model_globals,
+                                   elf_seed_frame->seed_h_w_b,
+                                   elf_seed_frame->seed_l_c_b,
+                                   elf_seed_frame->seed_b_i_static,
+                                   elf_seed_frame->seed_prior_magnetic_body);
         print_seed_state((const double *)&state);
         dp_time_seed_full(elf_seed_frame->seed_calendar,
                           elf_seed_frame->seed_time_second_decimal,
