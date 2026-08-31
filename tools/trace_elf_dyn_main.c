@@ -21,6 +21,9 @@
 #include <unistd.h>
 
 #define ELF_DYN_MAIN_OFFSET 0x4020u
+#define ELF_GET_DYN_INPUT_OFFSET 0x2050u
+#define ELF_SEND_DYN_TELE_OFFSET 0x22a0u
+#define ELF_DIFFERENTIAL_EQUATION_OFFSET 0x6a50u
 #define ELF_Y_OFFSET 0x2184e0u
 #define ELF_OUTPUT_OFFSET 0x218760u
 #define ELF_STATE_SHM "/cfs_test_elf_state"
@@ -30,6 +33,7 @@
 #define ELF_TIME_CALENDAR_OFFSET 0x2186a0u
 #define ELF_TIME_TM_OFFSET 0x218be0u
 #define ELF_DEVICE_COMMAND_BYTES 0x78u
+#define ELF_MODEL_GLOBALS_OFFSET 0x215598u
 
 static int read_process_bytes(pid_t pid, unsigned long address, void *buffer, size_t bytes);
 
@@ -264,8 +268,18 @@ int main(int argc, char **argv)
     pid_t pid;
     unsigned long base;
     unsigned long entry_saved = 0ul;
+    unsigned long input_return_address = 0ul;
+    unsigned long input_return_saved = 0ul;
+    unsigned long input_entry_saved = 0ul;
     unsigned long return_address = 0ul;
     unsigned long return_saved = 0ul;
+    unsigned long send_return_address = 0ul;
+    unsigned long send_return_saved = 0ul;
+    unsigned long send_entry_saved = 0ul;
+    unsigned long rhs_return_address = 0ul;
+    unsigned long rhs_return_saved = 0ul;
+    unsigned long rhs_entry_saved = 0ul;
+    unsigned long rhs_output_address = 0ul;
     unsigned samples = argc >= 3 ? (unsigned)strtoul(argv[2], NULL, 10) : 1u;
     uint32_t expected_input_sequence = argc >= 4
         ? (uint32_t)strtoul(argv[3], NULL, 10) : 0u;
@@ -275,13 +289,25 @@ int main(int argc, char **argv)
     int seed_published = 0;
     int status;
     int entry_breakpoint = 0;
+    int input_entry_breakpoint = 0;
+    int input_return_breakpoint = 0;
     int return_breakpoint = 0;
+    int send_entry_breakpoint = 0;
+    int send_return_breakpoint = 0;
+    int rhs_entry_breakpoint = 0;
+    int rhs_return_breakpoint = 0;
+    unsigned rhs_samples = 0u;
     const char *ready_path = getenv("ELF_TRACE_READY_FILE");
     const char *rng_arm_path = getenv("ELF_RNG_ARM_FILE");
     const char *state_log_path = getenv("ELF_STATE_LOG");
     const char *state_shm_name = getenv("ELF_C_SHADOW_STATE_SHM");
     FILE *state_log = NULL;
     FILE *command_trace = NULL;
+    FILE *rhs_trace = NULL;
+    const char *rhs_trace_path = getenv("ELF_RHS_TRACE_FILE");
+    const char *rhs_trace_sequence_text = getenv("ELF_RHS_TRACE_SEQUENCE");
+    const uint32_t rhs_trace_sequence = rhs_trace_sequence_text == NULL ? 0u :
+        (uint32_t)strtoul(rhs_trace_sequence_text, NULL, 10);
     uint8_t active_command[ELF_DEVICE_COMMAND_BYTES] = {0};
     unsigned long active_command_address = 0u;
     int state_fd;
@@ -316,12 +342,14 @@ int main(int argc, char **argv)
     close(state_fd);
     close(input_fd);
     if (state_frame == MAP_FAILED || input_frame == MAP_FAILED ||
-        patch_byte(pid, base + ELF_DYN_MAIN_OFFSET, &entry_saved) != 0) {
-        fprintf(stderr, "无法设置 dyn_main 入口断点\n");
+        patch_byte(pid, base + ELF_DYN_MAIN_OFFSET, &entry_saved) != 0 ||
+        patch_byte(pid, base + ELF_GET_DYN_INPUT_OFFSET, &input_entry_saved) != 0) {
+        fprintf(stderr, "无法设置 ELF 输入/dyn_main 入口断点\n");
         (void)ptrace(PTRACE_DETACH, pid, NULL, NULL);
         return 3;
     }
     entry_breakpoint = 1;
+    input_entry_breakpoint = 1;
     state_frame->magic = DP_C_SHADOW_STATE_MAGIC;
     state_frame->version = DP_C_SHADOW_STATE_VERSION;
     state_frame->state_bytes = sizeof(state_frame->state);
@@ -340,6 +368,15 @@ int main(int argc, char **argv)
     if (state_log_path != NULL && state_log_path[0] != '\0') {
         state_log = fopen(state_log_path, "wb");
         if (state_log == NULL) {
+            (void)restore_word(pid, base + ELF_DYN_MAIN_OFFSET, entry_saved);
+            (void)ptrace(PTRACE_DETACH, pid, NULL, NULL);
+            return 3;
+        }
+    }
+    if (rhs_trace_path != NULL && rhs_trace_path[0] != '\0') {
+        rhs_trace = fopen(rhs_trace_path, "wb");
+        if (rhs_trace == NULL) {
+            if (state_log != NULL) (void)fclose(state_log);
             (void)restore_word(pid, base + ELF_DYN_MAIN_OFFSET, entry_saved);
             (void)ptrace(PTRACE_DETACH, pid, NULL, NULL);
             return 3;
@@ -382,14 +419,141 @@ int main(int argc, char **argv)
             continue;
         }
         if (!WIFSTOPPED(status) || WSTOPSIG(status) != SIGTRAP) {
-            fprintf(stderr, "正式ELF非断点停止: status=0x%x\n", status);
+            if (WIFSTOPPED(status)) {
+                struct user_regs_struct fault_regs;
+
+                memset(&fault_regs, 0, sizeof(fault_regs));
+                if (ptrace(PTRACE_GETREGS, pid, NULL, &fault_regs) == 0) {
+                    unsigned long stack_word = (unsigned long)ptrace(
+                        PTRACE_PEEKDATA, pid, (void *)fault_regs.rsp, NULL);
+                    fprintf(stderr,
+                            "正式ELF异常停止: signal=%d status=0x%x RIP=0x%lx "
+                            "RIP相对基址=0x%lx RSP=0x%lx 栈首=0x%lx\n",
+                            WSTOPSIG(status), status, (unsigned long)fault_regs.rip,
+                            (unsigned long)fault_regs.rip - base,
+                            (unsigned long)fault_regs.rsp, stack_word);
+                } else {
+                    fprintf(stderr, "正式ELF非断点停止: status=0x%x\n", status);
+                }
+            } else {
+                fprintf(stderr, "正式ELF非断点停止: status=0x%x\n", status);
+            }
             break;
         }
         if (ptrace(PTRACE_GETREGS, pid, NULL, &regs) != 0) break;
         /* ELF 启动和动态链接阶段也可能产生 SIGTRAP。只有 RIP 精确落在
          * 本工具写入的 dyn_main 入口或返回断点，才能作为状态采样边界。 */
-        if ((entry_breakpoint != 0 && regs.rip != base + ELF_DYN_MAIN_OFFSET + 1u) ||
-            (return_breakpoint != 0 && regs.rip != return_address + 1u)) {
+        if ((input_entry_breakpoint != 0 && regs.rip == base + ELF_GET_DYN_INPUT_OFFSET + 1u) ||
+            (input_return_breakpoint != 0 && regs.rip == input_return_address + 1u) ||
+            (entry_breakpoint != 0 && regs.rip == base + ELF_DYN_MAIN_OFFSET + 1u) ||
+            (return_breakpoint != 0 && regs.rip == return_address + 1u) ||
+            (send_entry_breakpoint != 0 && regs.rip == base + ELF_SEND_DYN_TELE_OFFSET + 1u) ||
+            (send_return_breakpoint != 0 && regs.rip == send_return_address + 1u) ||
+            (rhs_entry_breakpoint != 0 &&
+             regs.rip == base + ELF_DIFFERENTIAL_EQUATION_OFFSET + 1u) ||
+            (rhs_return_breakpoint != 0 && regs.rip == rhs_return_address + 1u)) {
+            /* 已识别的断点，交由下方状态机处理。 */
+        } else {
+            continue;
+        }
+        if (input_entry_breakpoint != 0 &&
+            regs.rip == base + ELF_GET_DYN_INPUT_OFFSET + 1u) {
+            input_return_address = (unsigned long)ptrace(PTRACE_PEEKDATA, pid,
+                                                         (void *)regs.rsp, NULL);
+            if (input_return_address == (unsigned long)-1 ||
+                restore_word(pid, base + ELF_GET_DYN_INPUT_OFFSET, input_entry_saved) != 0 ||
+                patch_byte(pid, input_return_address, &input_return_saved) != 0) break;
+            /* 输入闸门必须位于 getDynInput 前；dyn_main 入口时该拍命令已经
+             * 被读取，那里等待会必然造成一拍滞后。 */
+            if (seed_published != 0 && expected_input_sequence != 0u &&
+                wait_for_input_sequence(input_frame, expected_input_sequence) != 0) {
+                fprintf(stderr, "等待 ELF 输入序号 %u 超时，当前=%u\n",
+                        expected_input_sequence, input_frame->sequence);
+                break;
+            }
+            regs.rip = base + ELF_GET_DYN_INPUT_OFFSET;
+            if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) != 0) break;
+            input_entry_breakpoint = 0;
+            input_return_breakpoint = 1;
+            continue;
+        }
+        if (input_return_breakpoint != 0 && regs.rip == input_return_address + 1u) {
+            if (restore_word(pid, input_return_address, input_return_saved) != 0 ||
+                patch_byte(pid, base + ELF_GET_DYN_INPUT_OFFSET, &input_entry_saved) != 0) break;
+            regs.rip = input_return_address;
+            if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) != 0) break;
+            input_return_breakpoint = 0;
+            input_entry_breakpoint = 1;
+            continue;
+        }
+        if (rhs_entry_breakpoint != 0 &&
+            regs.rip == base + ELF_DIFFERENTIAL_EQUATION_OFFSET + 1u) {
+            rhs_output_address = regs.rdi;
+            rhs_return_address = (unsigned long)ptrace(PTRACE_PEEKDATA, pid,
+                                                        (void *)regs.rsp, NULL);
+            if (rhs_return_address == (unsigned long)-1 ||
+                restore_word(pid, base + ELF_DIFFERENTIAL_EQUATION_OFFSET, rhs_entry_saved) != 0 ||
+                patch_byte(pid, rhs_return_address, &rhs_return_saved) != 0) break;
+            regs.rip = base + ELF_DIFFERENTIAL_EQUATION_OFFSET;
+            if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) != 0) break;
+            rhs_entry_breakpoint = 0;
+            rhs_return_breakpoint = 1;
+            continue;
+        }
+        if (rhs_return_breakpoint != 0 && regs.rip == rhs_return_address + 1u) {
+            double rhs[DP_STATE_DIM];
+
+            if (read_process_bytes(pid, rhs_output_address, rhs, sizeof(rhs)) != 0 ||
+                restore_word(pid, rhs_return_address, rhs_return_saved) != 0) break;
+            if (rhs_trace != NULL) {
+                (void)fwrite(rhs, sizeof(rhs), 1u, rhs_trace);
+                (void)fflush(rhs_trace);
+            }
+            ++rhs_samples;
+            regs.rip = rhs_return_address;
+            if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) != 0) break;
+            rhs_return_breakpoint = 0;
+            if (rhs_samples < 4u &&
+                patch_byte(pid, base + ELF_DIFFERENTIAL_EQUATION_OFFSET, &rhs_entry_saved) != 0) break;
+            rhs_entry_breakpoint = rhs_samples < 4u;
+            continue;
+        }
+        if (send_entry_breakpoint != 0 && regs.rip == base + ELF_SEND_DYN_TELE_OFFSET + 1u) {
+            send_return_address = (unsigned long)ptrace(PTRACE_PEEKDATA, pid,
+                                                        (void *)regs.rsp, NULL);
+            if (send_return_address == (unsigned long)-1 ||
+                restore_word(pid, base + ELF_SEND_DYN_TELE_OFFSET, send_entry_saved) != 0 ||
+                patch_byte(pid, send_return_address, &send_return_saved) != 0) break;
+            regs.rip = base + ELF_SEND_DYN_TELE_OFFSET;
+            if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) != 0) break;
+            send_entry_breakpoint = 0;
+            send_return_breakpoint = 1;
+            continue;
+        }
+        if (send_return_breakpoint != 0 && regs.rip == send_return_address + 1u) {
+            if (ptrace(PTRACE_GETREGS, pid, NULL, &regs) != 0 ||
+                restore_word(pid, send_return_address, send_return_saved) != 0) break;
+            regs.rip = send_return_address;
+            if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) != 0) break;
+            state_frame->ipc_bytes =
+                read_elf_ipc_payload(pid, state_frame->ipc_payload) == 0
+                ? DP_IPC_PAYLOAD_BYTES : 0u;
+            state_frame->input_sequence = active_input_sequence;
+            state_frame->reserved = rng_record_count(getenv("DP_RNG_RECORD_FILE"));
+            memcpy(&state_frame->applied_command, active_command,
+                   sizeof(state_frame->applied_command));
+            write_command_trace(command_trace, active_input_sequence, active_command);
+            __atomic_store_n(&state_frame->sequence, captured + 1u, __ATOMIC_RELEASE);
+            if (state_log != NULL) {
+                (void)fwrite(state_frame, sizeof(*state_frame), 1u, state_log);
+                (void)fflush(state_log);
+            }
+            ++captured;
+            if (expected_input_sequence != 0u)
+                ++expected_input_sequence;
+            send_return_breakpoint = 0;
+            return_breakpoint = 0;
+            entry_breakpoint = 1;
             continue;
         }
         if (return_breakpoint == 0) {
@@ -408,6 +572,21 @@ int main(int argc, char **argv)
                 if (errno != 0) break;
                 memcpy(&state_frame->state[index], &low, sizeof(low));
             }
+            if (seed_published == 0) {
+                (void)read_device_snapshot(pid, base, state_frame->seed_device_globals);
+            }
+            if (seed_published == 0 && getenv("ELF_TRACE_REQUIRE_INITIALIZED") != NULL &&
+                !seed_snapshot_initialized(state_frame)) {
+                /* 预热也必须从 dyn_init 完成后的入口开始；启动阶段的 dyn_main
+                 * 依赖尚未建立的设备对象，不能拿来作为预热拍。 */
+                regs.rip = base + ELF_DYN_MAIN_OFFSET;
+                if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) != 0 ||
+                    restore_word(pid, return_address, return_saved) != 0 ||
+                    patch_byte(pid, base + ELF_DYN_MAIN_OFFSET, &entry_saved) != 0) break;
+                return_breakpoint = 0;
+                entry_breakpoint = 1;
+                continue;
+            }
             if (seed_published == 0 && warmup_pending == 0 &&
                 read_process_double(pid, base + ELF_T_OFFSET,
                                     &state_frame->seed_integration_time) == 0) {
@@ -421,18 +600,10 @@ int main(int argc, char **argv)
                 (void)read_process_bytes(pid, base + ELF_TIME_TM_OFFSET,
                                           &state_frame->seed_calendar_tm,
                                           sizeof(state_frame->seed_calendar_tm));
+                (void)read_process_bytes(pid, base + ELF_MODEL_GLOBALS_OFFSET,
+                                          state_frame->seed_model_globals,
+                                          sizeof(state_frame->seed_model_globals));
                 (void)read_device_snapshot(pid, base, state_frame->seed_device_globals);
-                if (captured == 0u && getenv("ELF_TRACE_REQUIRE_INITIALIZED") != NULL &&
-                    !seed_snapshot_initialized(state_frame)) {
-                    /* 启动期未完成 dyn_init 的调用不能作为双路回放的种子。 */
-                    regs.rip = base + ELF_DYN_MAIN_OFFSET;
-                    if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) != 0 ||
-                        restore_word(pid, return_address, return_saved) != 0 ||
-                        patch_byte(pid, base + ELF_DYN_MAIN_OFFSET, &entry_saved) != 0) break;
-                    return_breakpoint = 0;
-                    entry_breakpoint = 1;
-                    continue;
-                }
                 __atomic_store_n(&state_frame->seed_ready,
                                  DP_C_SHADOW_SEED_READY, __ATOMIC_RELEASE);
                 print_seed_state(state_frame->state);
@@ -447,17 +618,16 @@ int main(int argc, char **argv)
                 fprintf(stderr, "无法清零 ELF 输出共享区\n");
                 break;
             }
-            /* 入口断点停住后等待指定输入，保证 ELF 不会消费旧帧。 */
-            if (warmup_pending == 0 && expected_input_sequence != 0u &&
-                wait_for_input_sequence(input_frame, expected_input_sequence) != 0) {
-                fprintf(stderr, "等待 ELF 输入序号 %u 超时，当前=%u\n",
-                        expected_input_sequence, input_frame->sequence);
-                break;
-            }
             active_input_sequence = warmup_pending != 0 ? 0u : expected_input_sequence != 0u
                 ? expected_input_sequence : input_frame->sequence;
             if (read_process_bytes(pid, active_command_address, active_command,
                                    sizeof(active_command)) != 0) break;
+            if (rhs_trace != NULL && active_input_sequence == rhs_trace_sequence) {
+                rhs_samples = 0u;
+                if (patch_byte(pid, base + ELF_DIFFERENTIAL_EQUATION_OFFSET,
+                               &rhs_entry_saved) != 0) break;
+                rhs_entry_breakpoint = 1;
+            }
             regs.rip = base + ELF_DYN_MAIN_OFFSET;
             if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) != 0) break;
             entry_breakpoint = 0;
@@ -466,6 +636,10 @@ int main(int argc, char **argv)
         }
         if (ptrace(PTRACE_GETREGS, pid, NULL, &regs) != 0 ||
             restore_word(pid, return_address, return_saved) != 0) break;
+        if (rhs_entry_breakpoint != 0) {
+            (void)restore_word(pid, base + ELF_DIFFERENTIAL_EQUATION_OFFSET, rhs_entry_saved);
+            rhs_entry_breakpoint = 0;
+        }
         if (seed_published != 0) {
             for (unsigned attempts = 0u;
                  attempts < 30000u &&
@@ -516,6 +690,9 @@ int main(int argc, char **argv)
         if (warmup_pending != 0) {
             memcpy(state_frame->seed_device_globals, state_frame->device_globals,
                    sizeof(state_frame->seed_device_globals));
+            (void)read_process_bytes(pid, base + ELF_MODEL_GLOBALS_OFFSET,
+                                     state_frame->seed_model_globals,
+                                     sizeof(state_frame->seed_model_globals));
             memcpy(state_frame->seed_calendar, state_frame->calendar,
                    sizeof(state_frame->seed_calendar));
             state_frame->seed_calendar_tm = state_frame->calendar_tm;
@@ -543,6 +720,15 @@ int main(int argc, char **argv)
             entry_breakpoint = 1;
             continue;
         }
+        /* 正式 main 的循环计数为 0、25、50... 时在 dyn_main 返回后调用
+         * sendDynTele。发布拍必须等 sendDynTele 返回后再冻结 IPC 有效载荷。 */
+        if (captured % 25u == 0u) {
+            if (patch_byte(pid, base + ELF_SEND_DYN_TELE_OFFSET, &send_entry_saved) != 0)
+                break;
+            send_entry_breakpoint = 1;
+            return_breakpoint = 0;
+            continue;
+        }
         state_frame->input_sequence = active_input_sequence;
         state_frame->reserved = rng_record_count(getenv("DP_RNG_RECORD_FILE"));
         memcpy(&state_frame->applied_command, active_command,
@@ -565,13 +751,26 @@ int main(int argc, char **argv)
         entry_breakpoint = 1;
     }
     if (entry_breakpoint != 0) (void)restore_word(pid, base + ELF_DYN_MAIN_OFFSET, entry_saved);
+    if (input_entry_breakpoint != 0)
+        (void)restore_word(pid, base + ELF_GET_DYN_INPUT_OFFSET, input_entry_saved);
+    if (input_return_breakpoint != 0)
+        (void)restore_word(pid, input_return_address, input_return_saved);
     if (return_breakpoint != 0) (void)restore_word(pid, return_address, return_saved);
+    if (send_entry_breakpoint != 0)
+        (void)restore_word(pid, base + ELF_SEND_DYN_TELE_OFFSET, send_entry_saved);
+    if (send_return_breakpoint != 0)
+        (void)restore_word(pid, send_return_address, send_return_saved);
+    if (rhs_entry_breakpoint != 0)
+        (void)restore_word(pid, base + ELF_DIFFERENTIAL_EQUATION_OFFSET, rhs_entry_saved);
+    if (rhs_return_breakpoint != 0)
+        (void)restore_word(pid, rhs_return_address, rhs_return_saved);
     /* 采样结束后立即停止 ELF 随机数记录，避免脱离采样器后的运行数据混入回放文件。 */
     if (rng_arm_path != NULL && rng_arm_path[0] != '\0')
         (void)unlink(rng_arm_path);
     (void)ptrace(PTRACE_DETACH, pid, NULL, NULL);
     if (state_log != NULL) (void)fclose(state_log);
     if (command_trace != NULL) (void)fclose(command_trace);
+    if (rhs_trace != NULL) (void)fclose(rhs_trace);
     if (state_frame != MAP_FAILED) (void)munmap(state_frame, sizeof(*state_frame));
     if (input_frame != MAP_FAILED) (void)munmap(input_frame, sizeof(*input_frame));
     printf("1. 结果=%s\n2. ELF dyn_main返回采样=%u\n3. 状态维度=%u\n4. 状态共享内存=%s\n5. 输入序号闸门=%s\n",

@@ -12,8 +12,9 @@
 #define DP_C_SHADOW_STATE_SHM "/cfs_test_c_shadow_state"
 #define DP_C_SHADOW_STATE_SHM_ENV "C_SHADOW_STATE_SHM"
 #define DP_C_SHADOW_STATE_MAGIC UINT32_C(0x43534844)
-#define DP_C_SHADOW_STATE_VERSION 8u
+#define DP_C_SHADOW_STATE_VERSION 9u
 #define DP_DEVICE_GLOBAL_SNAPSHOT_BYTES 0x1640u
+#define DP_MODEL_GLOBAL_SNAPSHOT_BYTES 0x1330u
 #define DP_C_SHADOW_SEED_READY UINT32_C(0x53454544)
 #define DP_IPC_PAYLOAD_BYTES (DP_IPC_SHM_BYTES - DP_IPC_RWLOCK_BYTES)
 
@@ -52,6 +53,9 @@ typedef struct {
     double state[DP_STATE_DIM];
     DpMainTelemetryFrame telemetry;
     DpDeviceMeasureRecovered devices;
+    /* ELF 0x215598..0x2168c8：步长、惯量、Sat、SatTorque 等动力学全局对象。
+     * 仅作为共同初态使用；正式积分后不再读取 ELF。 */
+    uint8_t seed_model_globals[DP_MODEL_GLOBAL_SNAPSHOT_BYTES];
     uint8_t seed_device_globals[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES];
     uint8_t device_globals[DP_DEVICE_GLOBAL_SNAPSHOT_BYTES];
     uint8_t ipc_payload[DP_IPC_PAYLOAD_BYTES];

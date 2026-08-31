@@ -10,7 +10,7 @@ SRC := src/dynamic_rng.c src/dynamic_math.c src/dynamic_devices.c src/dynamic_de
 OBJ := $(SRC:src/%.c=$(BUILD)/%.o)
 LIB := $(BUILD)/libdynamicpackage_recovered.a
 
-.PHONY: all clean selftest shadow-runtime compare-state compare-state-frames compare-state-logs compare-shadow-stats dump-sada-frame rng-record start-gate publish-dual-input run-dual-sequence trace-elf-dyn-main reset-elf-runtime full-shadow-validation import-gold compare-matrix check-h0-fifty check-h15-global-y check-h16-h17-global-y check-h4-h5-h7-global-y check-h26-high-ecc-cross-command check-h27-third-seed-cross-command check-h28-dyn-main-array check-h29-get-desk-command check-h30-startup-chain check-h31-get-desk-lifecycle check-h32-high-ecc-safe-boundary check-h33-ipc-getter-invalid check-h34-circular-equatorial check-h35-near-parabolic
+.PHONY: all clean selftest shadow-runtime compare-state compare-state-frames compare-state-logs compare-shadow-stats analyze-rk4-rhs trace-c-rhs dump-sada-frame rng-record start-gate publish-dual-input run-dual-sequence trace-elf-dyn-main reset-elf-runtime full-shadow-validation import-gold compare-matrix send-dyn-tele-gold check-h0-fifty check-h15-global-y check-h16-h17-global-y check-h4-h5-h7-global-y check-h26-high-ecc-cross-command check-h27-third-seed-cross-command check-h28-dyn-main-array check-h29-get-desk-command check-h30-startup-chain check-h31-get-desk-lifecycle check-h32-high-ecc-safe-boundary check-h33-ipc-getter-invalid check-h34-circular-equatorial check-h35-near-parabolic
 
 all: $(LIB)
 
@@ -46,6 +46,12 @@ compare-state-logs: all
 compare-shadow-stats: all
 	$(CC) $(CPPFLAGS) $(CFLAGS) tools/compare_shadow_stats.c -lm -pthread -lrt -o $(BUILD)/compare_shadow_stats
 
+analyze-rk4-rhs: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) tools/analyze_rk4_rhs.c -o $(BUILD)/analyze_rk4_rhs
+
+trace-c-rhs: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) tools/trace_c_rhs.c -o $(BUILD)/trace_c_rhs
+
 dump-sada-frame: all
 	$(CC) $(CPPFLAGS) $(CFLAGS) tools/dump_sada_frame.c -o $(BUILD)/dump_sada_frame
 
@@ -69,6 +75,10 @@ reset-elf-runtime:
 
 full-shadow-validation:
 	bash tools/run_full_shadow_validation.sh
+
+send-dyn-tele-gold: all
+	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/send_dyn_tele_public_gold_compare.c $(LIB) -lm -pthread -lrt -o $(BUILD)/send_dyn_tele_public_gold_compare
+	DP_IPC_SHM_NAME=/cfs_test_ipc_gold_validation $(BUILD)/send_dyn_tele_public_gold_compare
 
 selftest: all
 	$(CC) $(CPPFLAGS) $(CFLAGS) analysis/math_abi_selftest.c $(BUILD)/dynamic_math.o -lm -o $(BUILD)/math_abi_selftest

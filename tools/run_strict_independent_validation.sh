@@ -11,6 +11,10 @@ if [[ -n "$input_csv" ]]; then
     [[ "$steps" -gt 0 ]]
     replay_args=(--csv "$input_csv")
 fi
+runtime_steps="$steps"
+# 回放器默认会先发送 2 个零输入预置帧，用于完成启动态收敛；两路进程
+# 必须为这两帧预留积分步，否则正式帧结束后会等待不存在的序号。
+runtime_steps=$((steps + 2))
 mkdir -p "$case_dir"
 
 release="$case_dir/start.release"
@@ -21,6 +25,8 @@ rng_gaussian_callers="$case_dir/rng_gaussian_callers.txt"
 rng_gaussian_parents="$case_dir/rng_gaussian_parents.txt"
 c_gaussian_callers="$case_dir/c_gaussian_callers.txt"
 c_rng_stages="$case_dir/c_rng_stages.txt"
+elf_rhs="$case_dir/elf_rhs.bin"
+c_rhs="$case_dir/c_rhs.bin"
 elf_commands="$case_dir/elf_commands.txt"
 input_delivery="$case_dir/input_delivery.txt"
 ready="$case_dir/trace.ready"
@@ -28,25 +34,31 @@ c_ready="$case_dir/c_shadow.ready"
 state_shm="/cfs_test_elf_state_$$"
 c_state_shm="/cfs_test_c_shadow_state_$$"
 input_shm="/cfs_test_shadow_input_$$"
+c_ipc_shm="/cfs_test_c_shadow_ipc_$$"
 c_pid=""
 elf_pid=""
 trace_pid=""
+c_trace_pid=""
+c_runtime_bin="${C_SHADOW_RUNTIME_BIN:-./build/c_shadow_runtime}"
 
 cleanup()
 {
     [[ -n "$trace_pid" ]] && kill "$trace_pid" 2>/dev/null || true
+    [[ -n "$c_trace_pid" ]] && kill "$c_trace_pid" 2>/dev/null || true
     [[ -n "$c_pid" ]] && kill "$c_pid" 2>/dev/null || true
     [[ -n "$elf_pid" ]] && kill "$elf_pid" 2>/dev/null || true
     [[ -n "$trace_pid" ]] && wait "$trace_pid" 2>/dev/null || true
+    [[ -n "$c_trace_pid" ]] && wait "$c_trace_pid" 2>/dev/null || true
     [[ -n "$c_pid" ]] && wait "$c_pid" 2>/dev/null || true
     [[ -n "$elf_pid" ]] && wait "$elf_pid" 2>/dev/null || true
     rm -f "/dev/shm/${input_shm#/}"
     rm -f "/dev/shm/${c_state_shm#/}"
     rm -f "/dev/shm/${state_shm#/}"
+    rm -f "/dev/shm/${c_ipc_shm#/}"
 }
 trap cleanup EXIT
 
-make shadow-runtime trace-elf-dyn-main run-dual-sequence compare-state-logs \
+make shadow-runtime trace-elf-dyn-main trace-c-rhs run-dual-sequence compare-state-logs \
     rng-record start-gate >/dev/null
 touch "$rng"
 
@@ -58,10 +70,12 @@ C_SHADOW_RNG_STAGE_TRACE="$c_rng_stages" \
 C_SHADOW_SEED_FROM_ELF=1 \
 C_SHADOW_STRICT_INDEPENDENT=1 \
 C_SHADOW_RNG_REPLAY="$rng" \
+C_SHADOW_IPC_SHM="$c_ipc_shm" \
 ELF_C_SHADOW_STATE_SHM="$state_shm" \
 C_SHADOW_READY_FILE="$c_ready" \
 C_SHADOW_STATE_LOG="$case_dir/c_state.bin" \
-./build/c_shadow_runtime "$steps" >"$case_dir/c_runtime.log" 2>&1 &
+C_SHADOW_STARTUP_PRIMER=2 \
+"$c_runtime_bin" "$runtime_steps" >"$case_dir/c_runtime.log" 2>&1 &
 c_pid=$!
 
 for _ in $(seq 1 3000); do
@@ -80,6 +94,18 @@ DP_RNG_GAUSSIAN_PARENT_RECORD_FILE="$rng_gaussian_parents" \
 /home/gpc22/code/cfs_test/tools/DynamicPackage >"$case_dir/elf_runtime.log" 2>&1 &
 elf_pid=$!
 
+# 等待 exec 已完成、ELF 的可执行映射已出现。否则 ptrace 可能附加到尚未
+# exec 的 shell 子进程，采样器无法按 DynamicPackage 的映射计算基址。
+for _ in $(seq 1 3000); do
+    [[ -r "/proc/$elf_pid/maps" ]] &&
+        awk '$2 ~ /r.xp/ && $NF ~ /\/DynamicPackage$/ { found=1 } END { exit !found }' \
+            "/proc/$elf_pid/maps" && break
+    sleep 0.01
+done
+[[ -r "/proc/$elf_pid/maps" ]]
+awk '$2 ~ /r.xp/ && $NF ~ /\/DynamicPackage$/ { found=1 } END { exit !found }' \
+    "/proc/$elf_pid/maps"
+
 ELF_C_SHADOW_STATE_SHM="$state_shm" \
 C_SHADOW_INPUT_SHM="$input_shm" \
 C_SHADOW_STATE_SHM="$c_state_shm" \
@@ -90,7 +116,9 @@ ELF_TRACE_REQUIRE_INITIALIZED=1 \
 ELF_STATE_LOG="$case_dir/elf_state.bin" \
 ELF_TRACE_READY_FILE="$ready" \
 ELF_TRACE_DISABLE_POST_ACK=1 \
-./build/trace_elf_dyn_main "$elf_pid" "$steps" 1 >"$case_dir/elf_trace.log" 2>&1 &
+ELF_RHS_TRACE_FILE="$elf_rhs" \
+ELF_RHS_TRACE_SEQUENCE="${C_SHADOW_RHS_SEQUENCE:-1986}" \
+./build/trace_elf_dyn_main "$elf_pid" "$runtime_steps" 1 >"$case_dir/elf_trace.log" 2>&1 &
 trace_pid=$!
 
 for _ in $(seq 1 3000); do
@@ -102,9 +130,31 @@ touch "$release"
 
 for _ in $(seq 1 3000); do
     [[ -f "$c_ready" ]] && break
+    # 短测可能在轮询间隔内完成并删除 ready 文件；此时由后续 wait
+    # 检查退出状态，不能把正常完成误判为同步失败。
+    if [[ -n "$c_pid" ]] && ! kill -0 "$c_pid" 2>/dev/null; then
+        break
+    fi
     sleep 0.01
 done
-[[ -f "$c_ready" ]]
+if [[ ! -f "$c_ready" ]] && [[ -n "$c_pid" ]] && kill -0 "$c_pid" 2>/dev/null; then
+    echo "纯C影子未完成ready握手" >&2
+    exit 5
+fi
+
+if [[ "${C_SHADOW_TRACE_C_RHS:-0}" == "1" ]]; then
+    c_rhs_offset="$(nm -n build/c_shadow_runtime | awk '$3 == "differential_equation" { value="0x" $1 } END { print value }')"
+    [[ -n "$c_rhs_offset" ]]
+    ./build/trace_c_rhs "$c_pid" "$c_rhs_offset" "${C_SHADOW_RHS_SEQUENCE:-1986}" "$c_rhs" \
+        >"$case_dir/c_rhs_trace.log" 2>&1 &
+    c_trace_pid=$!
+    for _ in $(seq 1 3000); do
+        tracer_pid="$(awk '/TracerPid:/ { print $2 }' "/proc/$c_pid/status")"
+        [[ "$tracer_pid" == "$c_trace_pid" ]] && break
+        sleep 0.01
+    done
+    [[ "$tracer_pid" == "$c_trace_pid" ]]
+fi
 
 for _ in $(seq 1 3000); do
     [[ -e "/proc/$elf_pid/fd/3" ]] && break
@@ -117,10 +167,15 @@ C_SHADOW_INPUT_SHM="$input_shm" \
 C_SHADOW_STATE_SHM="$c_state_shm" \
 ELF_C_SHADOW_STATE_SHM="$state_shm" \
 INPUT_DELIVERY_LOG="$input_delivery" \
+C_SHADOW_STARTUP_PRIMER=2 \
 ./build/run_dual_sequence "${replay_args[@]}" >"$case_dir/input_replay.log" 2>&1
 
 wait "$c_pid"
 c_pid=""
+if [[ -n "$c_trace_pid" ]]; then
+    wait "$c_trace_pid"
+    c_trace_pid=""
+fi
 wait "$trace_pid"
 trace_pid=""
 ./build/compare_state_logs "$case_dir/c_state.bin" "$case_dir/elf_state.bin" \

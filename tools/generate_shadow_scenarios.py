@@ -70,6 +70,8 @@ def main():
         for step in range(10000)
     ]
     write_case(directory, "08_mixed_1000", mixed_frames[:1000])
+    write_case(directory, "08b_mixed_2000", mixed_frames[:2000])
+    write_case(directory, "08c_mixed_4000", mixed_frames[:4000])
     write_case(directory, "09_mixed_10000", mixed_frames)
     print(directory)
 

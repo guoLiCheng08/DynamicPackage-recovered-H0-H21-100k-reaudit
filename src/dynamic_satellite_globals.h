@@ -75,6 +75,10 @@ void Update_sat_inertia_xw(int32_t flag);
 /* 为 dynamics_flex 公开包装装配已审计的全局默认刚柔矩阵视图；调用方填入动量项。 */
 int dp_global_default_flex_config_get(DpFlexDynamicsConfig *out_config);
 
+/* 严格双路回放在导入外部共同初态后调用：将已重绑的 Sat backing 同步到
+ * 恢复端私有刚柔模型，避免私有缓存仍停留在 C 自身初始化值。 */
+int dp_global_restore_sat_model_from_runtime(void);
+
 /* 原 ELF ABI：六个寄存器 DpVector*（3,3,10,10,10,10），随后依次为
  * L_c_B、H_w_B、J_c_B、J_c_B_inv 描述符。 */
 void dynamics_flex(DpVector *angular_acceleration, const DpVector *body_rate,

@@ -386,6 +386,71 @@ static void dp_global_default_sat_descriptors_sync(void)
                         &dp_global_default_model.modal_d);
 }
 
+static int dp_global_copy_sat_matrix(size_t offset, double *destination, size_t count)
+{
+    DpMatrix matrix = dp_sat_matrix_load(offset);
+
+    if (destination == NULL || matrix.data == NULL ||
+        (size_t)matrix.rows * (size_t)matrix.row_stride < count) {
+        return -1;
+    }
+    memcpy(destination, matrix.data, count * sizeof(*destination));
+    return 0;
+}
+
+int dp_global_restore_sat_model_from_runtime(void)
+{
+    DpMatrix inertia = dp_sat_matrix_load(DP_SAT_INERTIA_DESCRIPTOR_OFFSET);
+    DpMatrix inverse = dp_sat_matrix_load(DP_SAT_INERTIA_INV_DESCRIPTOR_OFFSET);
+
+    if (dp_global_model_ready == 0 &&
+        dp_core_default_model_init(&dp_global_default_model) != 0) {
+        return -1;
+    }
+    if (inertia.data == NULL || inverse.data == NULL ||
+        dp_global_copy_sat_matrix(DP_SAT_M3E8_DESCRIPTOR_OFFSET,
+                                  dp_global_default_model.m3_e8, 9u) != 0 ||
+        dp_global_copy_sat_matrix(DP_SAT_M448_DESCRIPTOR_OFFSET,
+                                  dp_global_default_model.m3_448, 9u) != 0 ||
+        dp_global_copy_sat_matrix(DP_SAT_M4A8_DESCRIPTOR_OFFSET,
+                                  dp_global_default_model.m3_4a8, 9u) != 0 ||
+        dp_global_copy_sat_matrix(DP_SAT_M508_DESCRIPTOR_OFFSET,
+                                  dp_global_default_model.m3_508, 9u) != 0 ||
+        dp_global_copy_sat_matrix(DP_SAT_M568_DESCRIPTOR_OFFSET,
+                                  dp_global_default_model.m3_568, 9u) != 0 ||
+        dp_global_copy_sat_matrix(DP_SAT_M688_DESCRIPTOR_OFFSET,
+                                  dp_global_default_model.m6, 30u) != 0 ||
+        dp_global_copy_sat_matrix(DP_SAT_COUPLING_DESCRIPTOR_OFFSET,
+                                  dp_global_default_model.coupling_data, 30u) != 0 ||
+        dp_global_copy_sat_matrix(DP_SAT_M9A0_DESCRIPTOR_OFFSET,
+                                  dp_global_default_model.m9, 9u) != 0 ||
+        dp_global_copy_sat_matrix(DP_SAT_MODAL_A_DESCRIPTOR_OFFSET,
+                                  dp_global_default_model.modal_a_data, 100u) != 0 ||
+        dp_global_copy_sat_matrix(DP_SAT_MODAL_D_DESCRIPTOR_OFFSET,
+                                  dp_global_default_model.modal_d_data, 100u) != 0) {
+        return -1;
+    }
+    memcpy(dp_global_default_model.inertia, inertia.data,
+           sizeof(dp_global_default_model.inertia));
+    memcpy(dp_global_default_model.inverse, inverse.data,
+           sizeof(dp_global_default_model.inverse));
+    dp_global_default_model.coupling = (DpMatrix){3, 10, 10, 0,
+                                                   dp_global_default_model.coupling_data};
+    dp_global_default_model.base_inertia = (DpMatrix){3, 3, 3, 0, J_c_B_mem};
+    dp_global_default_model.modal_a = (DpMatrix){10, 10, 10, 0,
+                                                  dp_global_default_model.modal_a_data};
+    dp_global_default_model.modal_d = (DpMatrix){10, 10, 10, 0,
+                                                  dp_global_default_model.modal_d_data};
+    dp_global_default_model.sada_command_momentum_map =
+        (DpMatrix){3, 3, 3, 0, dp_global_default_model.m9};
+    dp_global_default_model.sada_modal_pre_map_3x3 =
+        (DpMatrix){3, 3, 3, 0, dp_global_default_model.m3_4a8};
+    dp_global_default_model.sada_modal_acceleration_map_3xn =
+        (DpMatrix){3, 10, 10, 0, dp_global_default_model.m6};
+    dp_global_model_ready = 1;
+    return 0;
+}
+
 int dp_global_default_inertia_baseline_get(double out_inertia_3x3[9])
 {
     if (out_inertia_3x3 == NULL || dp_core_default_model_init(&dp_global_default_model) != 0) {

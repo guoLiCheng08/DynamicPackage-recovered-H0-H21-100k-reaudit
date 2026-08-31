@@ -42,8 +42,9 @@ static void dp_trace_gaussian_caller(void *caller)
         offset -= (uintptr_t)caller_info.dli_fbase;
     length = snprintf(line, sizeof(line), "%llu 0x%lx\n",
                       (unsigned long long)dp_rng_count(), (unsigned long)offset);
-    if (length > 0 && (size_t)length < sizeof(line))
-        (void)write(trace_fd, line, (size_t)length);
+    if (length > 0 && (size_t)length < sizeof(line)) {
+        if (write(trace_fd, line, (size_t)length) < 0) return;
+    }
 }
 
 /* 原 Gyro_Init：每个 0x320 对象均将配置源、转置输出与测量向量

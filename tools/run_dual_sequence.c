@@ -148,6 +148,9 @@ int main(int argc, char **argv)
     const char *delivery_log_path = getenv("INPUT_DELIVERY_LOG");
     FILE *delivery_log = NULL;
     unsigned long delivery_mismatch_count = 0ul;
+    unsigned long formal_count = 0ul;
+    const char *primer_text = getenv("C_SHADOW_STARTUP_PRIMER");
+    const unsigned long primer_count = primer_text != NULL ? strtoul(primer_text, NULL, 10) : 0ul;
 
     if (argc == 3 && strcmp(argv[1], "--csv") == 0) {
         input = fopen(argv[2], "r");
@@ -171,7 +174,27 @@ int main(int argc, char **argv)
         if (delivery_log == NULL) return 3;
     }
 
-    for (sequence = 1ul; input == NULL ? sequence <= count : fgets(line, sizeof(line), input) != NULL;
+    if (primer_count != 0ul) {
+        const double primer_values[15] = {0.0};
+        unsigned long primer_sequence;
+
+        for (primer_sequence = 1ul; primer_sequence <= primer_count; ++primer_sequence) {
+            if (publish_command(replay, (uint32_t)primer_sequence, primer_values) != 0 ||
+                wait_sequence(c_state, (uint32_t)primer_sequence) != 0 ||
+                wait_sequence(elf_state, (uint32_t)primer_sequence) != 0)
+                return 5;
+            if (delivery_log != NULL) {
+                const int matched = command_matches(&replay->command,
+                                                    &elf_state->applied_command);
+                (void)fprintf(delivery_log, "预置帧%lu 请求与ELF实际输入=%s（不计入正式统计）\n",
+                              primer_sequence, matched ? "一致" : "不一致");
+                (void)fflush(delivery_log);
+            }
+        }
+    }
+
+    for (sequence = primer_count + 1ul;
+         input == NULL ? formal_count < count : fgets(line, sizeof(line), input) != NULL;
          ++sequence) {
         if (input != NULL) {
             int parsed = parse_command_line(line, command_values);
@@ -192,15 +215,16 @@ int main(int argc, char **argv)
                           matched ? "一致" : "不一致");
             (void)fflush(delivery_log);
         }
+        ++formal_count;
     }
     if (input != NULL) {
         (void)fclose(input);
-        count = sequence - 1ul;
+        count = formal_count;
     }
     printf("1. 结果=通过\n2. 双路闭环输入帧=%lu\n3. 积分步长=0.01秒\n4. 仿真时长=%.2f秒\n",
            count, (double)count * 0.01);
     if (delivery_log != NULL) {
-        (void)fprintf(delivery_log, "汇总 请求与ELF实际输入不一致=%lu\n",
+        (void)fprintf(delivery_log, "汇总 正式请求与ELF实际输入不一致=%lu\n",
                       delivery_mismatch_count);
         (void)fclose(delivery_log);
         printf("5. 输入交付不一致=%lu\n", delivery_mismatch_count);

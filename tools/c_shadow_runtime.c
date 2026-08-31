@@ -88,6 +88,29 @@ static void restore_seed_actuator_devices(
     MagTorque_Init();
 }
 
+static void restore_seed_model_globals(
+    const uint8_t snapshot[DP_MODEL_GLOBAL_SNAPSHOT_BYTES])
+{
+    /* ELF 0x215598 起的连续区域。复制数值后仅重建 C 进程内 descriptor 指针，
+     * 绝不保留 ELF 虚拟地址。 */
+    memcpy(&step_time, snapshot + 0x000u, sizeof(step_time));
+    memcpy(&H_w_B, snapshot + 0x0b8u, sizeof(H_w_B));
+    memcpy(&L_c_B, snapshot + 0x0c8u, sizeof(L_c_B));
+    memcpy(&J_c_B_inv, snapshot + 0x0d8u, sizeof(J_c_B_inv));
+    memcpy(&J_c_B, snapshot + 0x0f8u, sizeof(J_c_B));
+    memcpy(&B_I_static, snapshot + 0x118u, sizeof(B_I_static));
+    memcpy(&Sat, snapshot + 0x148u, sizeof(Sat));
+    memcpy(&SatTorque, snapshot + 0x11c8u, sizeof(SatTorque));
+    H_w_B.data = H_w_B_mem;
+    L_c_B.data = L_c_B_mem;
+    J_c_B.data = J_c_B_mem;
+    J_c_B_inv.data = J_c_B_inv_mem;
+    B_I_static.data = B_I_static_mem;
+    SatParaInit();
+    TorqueInit();
+    (void)dp_global_restore_sat_model_from_runtime();
+}
+
 static int fill_ipc_snapshot(uint8_t payload[DP_IPC_PAYLOAD_BYTES])
 {
     memset(payload, 0, DP_IPC_PAYLOAD_BYTES);
@@ -197,6 +220,7 @@ int main(int argc, char **argv)
     /* 严格独立模式只在首步从 ELF 取得共同初态；后续时间和遥测均由 C 自行推进。 */
     const int strict_independent = getenv("C_SHADOW_STRICT_INDEPENDENT") != NULL;
     const char *rng_replay_path = getenv("C_SHADOW_RNG_REPLAY");
+    const char *ipc_shm_name = getenv("C_SHADOW_IPC_SHM");
     const char *elf_state_name = getenv("ELF_C_SHADOW_STATE_SHM");
     DpCShadowStateFrame *elf_seed_frame = NULL;
     int elf_seed_fd = -1;
@@ -209,6 +233,12 @@ int main(int argc, char **argv)
     if (elf_state_name == NULL || elf_state_name[0] != '/') {
         elf_state_name = "/cfs_test_elf_state";
     }
+    if (ipc_shm_name == NULL || ipc_shm_name[0] != '/') {
+        ipc_shm_name = "/cfs_test_c_shadow";
+    }
+    /* 必须在 DynamicDllInit 前选定独立共享区；初始化路径可能会先打开 IPC，
+     * 之后再 setenv 会造成 C 与 ELF 意外共享同一块输出内存。 */
+    if (setenv("DP_IPC_SHM_NAME", ipc_shm_name, 1) != 0) return 3;
     (void)signal(SIGINT, stop_runtime);
     (void)signal(SIGTERM, stop_runtime);
 
@@ -243,7 +273,6 @@ int main(int argc, char **argv)
          * 已处理帧，否则会跳过第一帧并造成两路结果整体错一拍。 */
         input_sequence = 0u;
     }
-    if (setenv("DP_IPC_SHM_NAME", "/cfs_test_c_shadow", 1) != 0) return 3;
     if (state_log_path != NULL && state_log_path[0] != '\0') {
         state_log = fopen(state_log_path, "wb");
         if (state_log == NULL) return 3;
@@ -276,6 +305,7 @@ int main(int argc, char **argv)
         t = integration_time;
         restore_seed_measurement_devices(elf_seed_frame->seed_device_globals);
         restore_seed_actuator_devices(elf_seed_frame->seed_device_globals);
+        restore_seed_model_globals(elf_seed_frame->seed_model_globals);
         print_seed_state((const double *)&state);
         dp_time_seed_full(elf_seed_frame->seed_calendar,
                           elf_seed_frame->seed_time_second_decimal,
@@ -342,6 +372,11 @@ int main(int argc, char **argv)
         }
         memset(&telemetry, 0, sizeof(telemetry));
         dyn_main(&telemetry, core_output, &command);
+        /* 正式 ELF main 在循环计数为 0、25、50... 时，于 dyn_main 返回后
+         * 调用 sendDynTele；C 影子必须保持同一发布周期。 */
+        if (steps % 25ul == 0ul) {
+            sendDynTele(NULL, &telemetry);
+        }
         if (dp_rng_had_error() != 0) {
             fprintf(stderr, "随机数回放数据不足或非法，已消耗=%llu\n",
                     (unsigned long long)dp_rng_count());

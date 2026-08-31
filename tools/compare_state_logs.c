@@ -88,15 +88,47 @@ static int device_snapshot_equal(const uint8_t c_snapshot[DP_DEVICE_GLOBAL_SNAPS
     return 1;
 }
 
+static int ipc_output_equal(const uint8_t c_payload[DP_IPC_PAYLOAD_BYTES],
+                            const uint8_t elf_payload[DP_IPC_PAYLOAD_BYTES],
+                            unsigned *first_offset)
+{
+    unsigned index;
+    const unsigned byte_base = DP_IPC_U8_BASE - DP_IPC_FLOAT_BASE;
+
+    for (index = 3u; index <= 19u; ++index) {
+        if (c_payload[byte_base + index] != elf_payload[byte_base + index]) {
+            *first_offset = byte_base + index;
+            return 0;
+        }
+    }
+    for (index = 12u; index <= 63u; ++index) {
+        const unsigned offset = index * sizeof(float);
+        if (memcmp(c_payload + offset, elf_payload + offset, sizeof(float)) != 0) {
+            *first_offset = offset;
+            return 0;
+        }
+    }
+    for (index = 219u; index <= 220u; ++index) {
+        const unsigned offset = index * sizeof(float);
+        if (memcmp(c_payload + offset, elf_payload + offset, sizeof(float)) != 0) {
+            *first_offset = offset;
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int compare_frame(const DpCShadowStateFrame *c_frame,
                          const DpCShadowStateFrame *elf_frame,
-                         unsigned row)
+                         unsigned row, int show_details)
 {
     unsigned index;
     unsigned state_mismatches = 0u;
     int telemetry_mismatch = 0;
     int device_mismatch = 0;
+    int ipc_mismatch = 0;
     unsigned device_offset = 0u;
+    unsigned ipc_offset = 0u;
     uint8_t c_device_value = 0u;
     uint8_t elf_device_value = 0u;
 
@@ -108,7 +140,7 @@ static int compare_frame(const DpCShadowStateFrame *c_frame,
     for (index = 0u; index < DP_STATE_DIM; ++index) {
         if (memcmp(&c_frame->state[index], &elf_frame->state[index],
                    sizeof(c_frame->state[index])) != 0) {
-            if (state_mismatches == 0u) {
+            if (show_details != 0 && state_mismatches == 0u) {
                 printf("首个状态分叉：行=%u 序号=%u 状态[%u] C=%.17g ELF=%.17g\n",
                        row, c_frame->input_sequence, index,
                        c_frame->state[index], elf_frame->state[index]);
@@ -130,13 +162,26 @@ static int compare_frame(const DpCShadowStateFrame *c_frame,
                                                  &device_offset, &c_device_value,
                                                  &elf_device_value);
     }
-    if (state_mismatches != 0u || telemetry_mismatch || device_mismatch) {
-        printf("行=%u 序号=%u 结果=失败 状态差异=%u/%u 遥测差异=%s 设备差异=%s\n",
-               row, c_frame->input_sequence, state_mismatches, DP_STATE_DIM,
-               telemetry_mismatch ? "是" : "否", device_mismatch ? "是" : "否");
-        if (device_mismatch) {
+    if (c_frame->ipc_bytes == DP_IPC_PAYLOAD_BYTES &&
+        elf_frame->ipc_bytes == DP_IPC_PAYLOAD_BYTES) {
+        ipc_mismatch = !ipc_output_equal(c_frame->ipc_payload, elf_frame->ipc_payload,
+                                         &ipc_offset);
+    }
+    if (state_mismatches != 0u || telemetry_mismatch || device_mismatch || ipc_mismatch) {
+        if (show_details != 0) {
+            printf("行=%u 序号=%u 结果=失败 状态差异=%u/%u 遥测差异=%s 设备差异=%s IPC差异=%s\n",
+                   row, c_frame->input_sequence, state_mismatches, DP_STATE_DIM,
+                   telemetry_mismatch ? "是" : "否", device_mismatch ? "是" : "否",
+                   ipc_mismatch ? "是" : "否");
+        }
+        if (show_details != 0 && device_mismatch) {
             printf("首个设备快照分叉：偏移=0x%04x C=0x%02x ELF=0x%02x\n",
                    device_offset, c_device_value, elf_device_value);
+        }
+        if (show_details != 0 && ipc_mismatch) {
+            printf("首个IPC有效载荷分叉：偏移=0x%04x C=0x%02x ELF=0x%02x\n",
+                   ipc_offset, c_frame->ipc_payload[ipc_offset],
+                   elf_frame->ipc_payload[ipc_offset]);
         }
         return 1;
     }
@@ -185,7 +230,7 @@ int main(int argc, char **argv)
             continue;
         }
         ++compared;
-        if (compare_frame(&c_frame, &elf_frame, row) != 0) failed = 1u;
+        if (compare_frame(&c_frame, &elf_frame, row, failed == 0u) != 0) ++failed;
     }
     fclose(c_log);
     fclose(elf_log);
