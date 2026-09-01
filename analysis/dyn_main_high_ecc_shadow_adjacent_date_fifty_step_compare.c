@@ -105,6 +105,15 @@ static int compare_blob(const char *label, const void *actual, const void *expec
             if (mismatches < 8u) {
                 printf("%s byte+0x%zx actual=%02x expected=%02x\n", label, index,
                        (unsigned)a[index], (unsigned)e[index]);
+                if (index == 0x1b8u || index == 0x1d0u) {
+                    double actual_value;
+                    double expected_value;
+
+                    memcpy(&actual_value, a + index, sizeof(actual_value));
+                    memcpy(&expected_value, e + index, sizeof(expected_value));
+                    printf("  ECEF字段 actual=%.17g expected=%.17g delta=%.17g\n",
+                           actual_value, expected_value, actual_value - expected_value);
+                }
             }
             ++mismatches;
         }
